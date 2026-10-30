@@ -1,5 +1,6 @@
 import gzip
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,6 @@ def extract_file(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     with gzip.open(path, "rt") as stream:
         for event_idx, line in enumerate(stream):
-
             record: dict = json.loads(line)
             clusters: dict[str, list] = record["layer_clusters"]
             gen: dict[str, list] = record["genparticles"]
@@ -43,7 +43,10 @@ def extract_file(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return clusters_df, genparticles_df
 
 
-def stratify_file_paths(data_dir: str | Path, seed: int = 42) -> dict[str, list[Path]]:
+def get_splits_by_file(
+    data_dir: str | Path,
+    seed: int = 42,
+) -> dict[str, list[Path]]:
 
     data_dir = Path(data_dir)
     files = sorted(data_dir.rglob("*.jsonl.gz"))
@@ -57,7 +60,10 @@ def stratify_file_paths(data_dir: str | Path, seed: int = 42) -> dict[str, list[
         groups.setdefault(path.relative_to(data_dir).parts[0], []).append(path)
 
     rng = np.random.default_rng(seed)
-    splits: dict[str, list[Path]] = {key: [] for key in ("train", "val", "test")}
+
+    splits_by_file: dict[str, list[Path]] = {
+        key: [] for key in ("train", "val", "test")
+    }
 
     for sample, paths in sorted(groups.items()):
         if len(paths) < 3:
@@ -65,31 +71,32 @@ def stratify_file_paths(data_dir: str | Path, seed: int = 42) -> dict[str, list[
 
         paths = [paths[i] for i in rng.permutation(len(paths))]
         nv, nt = max(1, round(0.12 * len(paths))), max(1, round(0.08 * len(paths)))
-        splits["val"].extend(paths[:nv])
-        splits["test"].extend(paths[nv : nv + nt])
-        splits["train"].extend(paths[nv + nt :])
+        splits_by_file["val"].extend(paths[:nv])
+        splits_by_file["test"].extend(paths[nv : nv + nt])
+        splits_by_file["train"].extend(paths[nv + nt :])
 
     assert not (
-        set(splits["train"]) & set(splits["val"])
-        or set(splits["train"]) & set(splits["test"])
-        or set(splits["val"]) & set(splits["test"])
+        set(splits_by_file["train"]) & set(splits_by_file["val"])
+        or set(splits_by_file["train"]) & set(splits_by_file["test"])
+        or set(splits_by_file["val"]) & set(splits_by_file["test"])
     )
 
-    return splits
+    return splits_by_file
 
 
-def load_stratified_dataframes(
-    data_dir: str | Path = DATA_PATH, seed: int = 42
+def split_data_in_directory(
+    data_dir: str | Path = DATA_PATH,
+    seed: int = 42,
 ) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
 
-    splits = stratify_file_paths(data_dir, seed=seed)
-    all_splits: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
+    splits_by_file = get_splits_by_file(data_dir, seed=seed)
+    splits_by_file_with_data: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
-    for split_name, paths in splits.items():
+    for split_name, file_paths in splits_by_file.items():
         cluster_frames: list[pd.DataFrame] = []
         gen_frames: list[pd.DataFrame] = []
 
-        for path in paths:
+        for path in file_paths:
             clusters_df, genparticles_df = extract_file(path)
             clusters_df["source_file"] = str(path)
             genparticles_df["source_file"] = str(path)
@@ -97,45 +104,47 @@ def load_stratified_dataframes(
             cluster_frames.append(clusters_df)
             gen_frames.append(genparticles_df)
 
-        all_splits[split_name] = (
+        splits_by_file_with_data[split_name] = (
             pd.concat(cluster_frames, ignore_index=True),
             pd.concat(gen_frames, ignore_index=True),
         )
 
-    return all_splits
+    return splits_by_file_with_data
 
 
 def frame_to_tensors(
     clusters_df: pd.DataFrame,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    
-    xyz = torch.from_numpy(clusters_df[["x", "y", "z"]].to_numpy(dtype=np.float32, copy=True))
-    energy = torch.from_numpy(clusters_df["E"].to_numpy(dtype=np.float32, copy=True))
-    labels = torch.from_numpy(clusters_df["gen_idx"].to_numpy(dtype=np.int64, copy=True))
+) -> dict[str, torch.Tensor]:
 
-    return xyz, energy, labels
+    xyz = torch.from_numpy(
+        clusters_df[["x", "y", "z"]].to_numpy(dtype=np.float32, copy=True)
+    )
+    energy = torch.from_numpy(clusters_df["E"].to_numpy(dtype=np.float32, copy=True))
+    labels = torch.from_numpy(
+        clusters_df["gen_idx"].to_numpy(dtype=np.int64, copy=True)
+    )
+
+    return {"xyz": xyz, "energy": energy, "labels": labels}
 
 
 class EventDataset(IterableDataset):
-
-    def __init__(self, file_paths: list[Path]) -> None:
+    def __init__(self, file_paths: list[Path], seed: int | None = None) -> None:
         self.file_paths = file_paths
-        self.clusters_df, self.genparticles_df = self._load_data_from_paths()
+        self.rng = np.random.default_rng(seed)
 
-    def _load_data_from_paths(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        cluster_frames: list[pd.DataFrame] = []
-        gen_frames: list[pd.DataFrame] = []
+    def _load_data_from_paths(self) -> Iterator[dict[str, torch.Tensor]]:
+        file_paths = list(self.file_paths)
+        self.rng.shuffle(file_paths)
 
-        for path in self.file_paths:
-            clusters_df, genparticles_df = extract_file(path)
-            clusters_df["source_file"] = str(path)
-            genparticles_df["source_file"] = str(path)
+        for path in file_paths:
+            clusters_df, _ = extract_file(path)
+            events = [
+                event_df for _, event_df in clusters_df.groupby("event_idx", sort=False)
+            ]
+            self.rng.shuffle(events)
 
-            cluster_frames.append(clusters_df)
-            gen_frames.append(genparticles_df)
+            for event_df in events:
+                yield frame_to_tensors(event_df)
 
-        return (
-            pd.concat(cluster_frames, ignore_index=True),
-            pd.concat(gen_frames, ignore_index=True),
-        )
-
+    def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
+        yield from self._load_data_from_paths()

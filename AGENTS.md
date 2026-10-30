@@ -30,3 +30,8 @@ Before considering a change to `.py` files complete, run:
   its own documentation. Do not add comments unless a line is inherently complex to read
   (e.g. a long/non-obvious calculation) and cannot be made clear through better naming or
   OOP structure instead.
+- If a function/method signature's return type annotation (`-> ...:`) is split onto its
+  own line, every parameter must also be on its own line (not left grouped together on one
+  line). Add a trailing comma after the last parameter — this triggers `ruff format`'s
+  magic-trailing-comma behavior, which keeps the parameters exploded one-per-line instead
+  of collapsing them back.
