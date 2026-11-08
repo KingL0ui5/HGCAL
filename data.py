@@ -10,7 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import IterableDataset, get_worker_info
 
 DATA_PATH = "CLUEEEE/closeby_layer_clusters/"
-PADDING_LABEL = -100
+IGNORE_LABEL = -100
 XYZ_SCALE = 300.0
 
 
@@ -123,9 +123,8 @@ def frame_to_tensors(
         clusters_df[["x", "y", "z"]].to_numpy(dtype=np.float32, copy=True)
     )
     energy = torch.from_numpy(clusters_df["E"].to_numpy(dtype=np.float32, copy=True))
-    labels = torch.from_numpy(
-        clusters_df["gen_idx"].to_numpy(dtype=np.int64, copy=True)
-    )
+    gen_idx = clusters_df["gen_idx"].to_numpy(dtype=np.int64, copy=True)
+    labels = torch.from_numpy(np.where(gen_idx < 0, IGNORE_LABEL, gen_idx))
 
     return {"xyz": xyz, "energy": energy, "labels": labels}
 
@@ -136,8 +135,10 @@ def collate_events(events: list[dict[str, torch.Tensor]]) -> dict[str, torch.Ten
     labels = pad_sequence(
         [event["labels"] for event in events],
         batch_first=True,
-        padding_value=PADDING_LABEL,
+        padding_value=IGNORE_LABEL,
     )
+    lengths = torch.tensor([len(event["labels"]) for event in events])
+    padding_mask = torch.arange(labels.shape[1]).unsqueeze(0) >= lengths.unsqueeze(1)
 
     return {
         "features": torch.cat(
@@ -145,7 +146,7 @@ def collate_events(events: list[dict[str, torch.Tensor]]) -> dict[str, torch.Ten
             dim=-1,
         ),
         "labels": labels,
-        "padding_mask": labels == PADDING_LABEL,
+        "padding_mask": padding_mask,
     }
 
 

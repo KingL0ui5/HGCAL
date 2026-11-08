@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from data import (
     DATA_PATH,
-    PADDING_LABEL,
+    IGNORE_LABEL,
     EventDataset,
     collate_events,
     get_splits_by_file,
@@ -179,7 +179,7 @@ def validate(
             total_loss += float(loss_fn(outputs, batch["labels"]).item())
             n_batches += 1
 
-            valid = ~batch["padding_mask"]
+            valid = batch["labels"] != IGNORE_LABEL
             predictions = outputs.argmax(dim=1)
 
             n_correct += int(
@@ -199,7 +199,7 @@ def train(
     device: torch.device,
 ) -> None:
 
-    loss_fn = nn.CrossEntropyLoss(ignore_index=PADDING_LABEL)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
     optimizer = optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
