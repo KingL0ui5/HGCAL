@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, get_worker_info
 
 DATA_PATH = "CLUEEEE/closeby_layer_clusters/"
 PADDING_LABEL = -100
@@ -157,6 +157,10 @@ class EventDataset(IterableDataset):
     def _load_data_from_paths(self) -> Iterator[dict[str, torch.Tensor]]:
         file_paths = list(self.file_paths)
         self.rng.shuffle(file_paths)
+        worker_info = get_worker_info()
+
+        if worker_info is not None:
+            file_paths = file_paths[worker_info.id :: worker_info.num_workers]
 
         for path in file_paths:
             clusters_df, _ = extract_file(path)

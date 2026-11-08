@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import torch
 from torch import Tensor, nn, no_grad, optim
@@ -34,6 +35,25 @@ class TrainConfig:
     log_every: int = 100
     grad_clip: float = 1.0
     seed: int = 42
+    num_workers: int = 4
+
+
+def select_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+
+    return torch.device("cpu")
+
+
+def batch_to_device(
+    batch: dict[str, Tensor],
+    device: torch.device,
+) -> dict[str, Tensor]:
+
+    return {key: value.to(device, non_blocking=True) for key, value in batch.items()}
 
 
 class TransformerModel(nn.Module):
@@ -70,24 +90,33 @@ class TransformerModel(nn.Module):
         return self.classifier(hidden).transpose(1, 2)
 
 
+def build_loader(
+    file_paths: list[Path],
+    config: TrainConfig,
+    pin_memory: bool,
+) -> DataLoader:
+
+    has_workers = config.num_workers > 0
+
+    return DataLoader(
+        EventDataset(file_paths, seed=config.seed),
+        batch_size=config.batch_size,
+        collate_fn=collate_events,
+        num_workers=config.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=has_workers,
+        prefetch_factor=2 if has_workers else None,
+    )
+
+
 def build_loaders(
-    batch_size: int,
-    seed: int,
+    config: TrainConfig,
+    pin_memory: bool,
 ) -> tuple[DataLoader, DataLoader]:
 
-    splits = get_splits_by_file(DATA_PATH, seed=seed)
-
-    train_loader = DataLoader(
-        EventDataset(splits["train"], seed=seed),
-        batch_size=batch_size,
-        collate_fn=collate_events,
-    )
-
-    validation_loader = DataLoader(
-        EventDataset(splits["val"], seed=seed),
-        batch_size=batch_size,
-        collate_fn=collate_events,
-    )
+    splits = get_splits_by_file(DATA_PATH, seed=config.seed)
+    train_loader = build_loader(splits["train"], config, pin_memory)
+    validation_loader = build_loader(splits["val"], config, pin_memory)
 
     return train_loader, validation_loader
 
@@ -100,13 +129,15 @@ def train_epoch(
     config: TrainConfig,
     tb_writer: tensorboard.SummaryWriter,
     global_step: int,
+    device: torch.device,
 ) -> tuple[float, int]:
 
     model.train()
     running_loss = 0.0
     last_loss = 0.0
 
-    for i, batch in enumerate(loader):
+    for i, cpu_batch in enumerate(loader):
+        batch = batch_to_device(cpu_batch, device)
         optimizer.zero_grad()
 
         outputs = model(batch["features"], batch["padding_mask"])
@@ -132,6 +163,7 @@ def validate(
     model: TransformerModel,
     loader: DataLoader,
     loss_fn: nn.Module,
+    device: torch.device,
 ) -> tuple[float, float]:
 
     model.eval()
@@ -141,7 +173,8 @@ def validate(
     n_points = 0
 
     with no_grad():
-        for batch in loader:
+        for cpu_batch in loader:
+            batch = batch_to_device(cpu_batch, device)
             outputs = model(batch["features"], batch["padding_mask"])
             total_loss += float(loss_fn(outputs, batch["labels"]).item())
             n_batches += 1
@@ -163,6 +196,7 @@ def train(
     train_loader: DataLoader,
     validation_loader: DataLoader,
     config: TrainConfig,
+    device: torch.device,
 ) -> None:
 
     loss_fn = nn.CrossEntropyLoss(ignore_index=PADDING_LABEL)
@@ -180,11 +214,13 @@ def train(
     for epoch in range(config.n_epochs):
         print(f"epoch {epoch + 1}/{config.n_epochs}")
         train_loss, global_step = train_epoch(
-            model, train_loader, loss_fn, optimizer, config, writer, global_step
+            model, train_loader, loss_fn, optimizer, config, writer, global_step, device
         )
+
         validation_loss, validation_accuracy = validate(
-            model, validation_loader, loss_fn
+            model, validation_loader, loss_fn, device
         )
+
         print(
             f"  train loss {train_loss:.4f} | val loss {validation_loss:.4f} "
             f"| val acc {validation_accuracy:.4f}"
@@ -210,12 +246,14 @@ def main() -> None:
     train_config = TrainConfig()
     torch.manual_seed(train_config.seed)
 
+    device = select_device()
+
     train_loader, validation_loader = build_loaders(
-        train_config.batch_size, train_config.seed
+        train_config, pin_memory=device.type == "cuda"
     )
 
-    model = TransformerModel(ModelConfig())
-    train(model, train_loader, validation_loader, train_config)
+    model = TransformerModel(ModelConfig()).to(device)
+    train(model, train_loader, validation_loader, train_config, device)
 
     torch.save(model.state_dict(), "model.pt")
 
