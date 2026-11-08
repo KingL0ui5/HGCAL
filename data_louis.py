@@ -6,9 +6,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import IterableDataset
 
 DATA_PATH = "CLUEEEE/closeby_layer_clusters/"
+PADDING_LABEL = -100
+XYZ_SCALE = 300.0
 
 
 def extract_file(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -46,7 +49,7 @@ def extract_file(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 def get_splits_by_file(
     data_dir: str | Path,
     seed: int = 42,
-) -> dict[str, list[Path]]:
+) -> dict[str, li # ty: ignore[invalid-mutable-override]st[Path]]:
 
     data_dir = Path(data_dir)
     files = sorted(data_dir.rglob("*.jsonl.gz"))
@@ -125,6 +128,25 @@ def frame_to_tensors(
     )
 
     return {"xyz": xyz, "energy": energy, "labels": labels}
+
+
+def collate_events(events: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    xyz = pad_sequence([event["xyz"] for event in events], batch_first=True)
+    energy = pad_sequence([event["energy"] for event in events], batch_first=True)
+    labels = pad_sequence(
+        [event["labels"] for event in events],
+        batch_first=True,
+        padding_value=PADDING_LABEL,
+    )
+
+    return {
+        "features": torch.cat(
+            [xyz / XYZ_SCALE, torch.log1p(energy).unsqueeze(-1)],
+            dim=-1,
+        ),
+        "labels": labels,
+        "padding_mask": labels == PADDING_LABEL,
+    }
 
 
 class EventDataset(IterableDataset):
