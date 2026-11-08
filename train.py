@@ -17,7 +17,7 @@ from data import (
 
 @dataclass
 class ModelConfig:
-    num_classes: int = 2
+    num_classes: int = 5
     d_model: int = 128
     n_heads: int = 8
     n_layers: int = 4
