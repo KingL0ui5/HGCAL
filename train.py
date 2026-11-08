@@ -217,6 +217,8 @@ def main() -> None:
     model = TransformerModel(ModelConfig())
     train(model, train_loader, validation_loader, train_config)
 
+    torch.save(model.state_dict(), "model.pt")
+
 
 if __name__ == "__main__":
     main()
