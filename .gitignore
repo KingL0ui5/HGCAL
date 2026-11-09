@@ -2,5 +2,6 @@ CLUEEEE/
 .vscode/
 .venv/
 __pycache__/
-models/
+trained_models/
+*.pt
 untracked/
