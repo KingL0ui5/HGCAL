@@ -19,4 +19,4 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python train_geo.py
+.venv/bin/python train/train_geo.py
