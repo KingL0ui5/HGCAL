@@ -20,8 +20,6 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.utils import to_dense_batch
 
-from . import register_model
-
 
 def mask_value(dtype: torch.dtype) -> float:
     """Additive bias that zeroes a padded key under softmax.
@@ -123,7 +121,6 @@ class Block(nn.Module):
         return x + self.drop_path(self.ffn(self.norm2(x)))
 
 
-@register_model("geo_transformer")
 class GeoTransformer(nn.Module):
     """Encode layer clusters -> geometry-biased global attention -> R^out_dim.
 

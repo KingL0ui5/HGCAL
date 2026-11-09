@@ -29,7 +29,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import register_loss
+from losses import register_loss
 
 EPS = 1e-12
 

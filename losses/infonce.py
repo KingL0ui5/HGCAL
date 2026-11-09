@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import register_loss
+from losses import register_loss
 
 
 def _event_infonce(z: torch.Tensor, labels: torch.Tensor, temperature: float) -> torch.Tensor:

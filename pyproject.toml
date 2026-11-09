@@ -10,6 +10,7 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "tensorboard>=2.21.0",
     "torch>=2.14.1",
+    "torch-geometric>=2.8.1",
 ]
 
 [dependency-groups]
