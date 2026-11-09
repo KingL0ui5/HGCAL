@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from data import DATA_PATH, IGNORE_LABEL, get_splits_by_file
 from models.transformer import ModelConfig, TransformerModel
-from train import (
+from train.train import (
     TrainConfig,
     batch_to_device,
     build_loader,

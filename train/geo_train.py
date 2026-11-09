@@ -21,9 +21,9 @@ from data import (
     EventDataset,
     get_splits_by_file,
 )
-from geo_transformer import GeoTransformer
 from losses import build_loss
-from train import select_device
+from models.geo_transformer import GeoTransformer
+from train.train import select_device
 
 FEATURE_NAMES = ["x", "y", "z", "energy", "eta", "sin_phi", "cos_phi"]
 GEOMETRIC_FEATURE_INDICES = [0, 1, 2, 4, 5, 6]

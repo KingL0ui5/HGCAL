@@ -3,3 +3,4 @@ CLUEEEE/
 .venv/
 __pycache__/
 models/
+untracked/
