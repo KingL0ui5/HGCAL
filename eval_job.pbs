@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N eval_model
+#PBS -l select=1:ncpus=4:mem=24gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=01:00:00
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+module purge
+
+export PATH="$HOME/.local/bin:$PATH"
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found; install it on the login node first: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    exit 1
+fi
+
+CHECKPOINT="${CHECKPOINT:?submit with: qsub -v CHECKPOINT=models/<run>_best.pt eval_job.pbs}"
+
+uv sync --frozen
+
+.venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
+
+.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT"
