@@ -1,6 +1,7 @@
 import argparse
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import matplotlib
 
@@ -14,6 +15,13 @@ from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
+from evals.reco_metrics import (
+    ClueParameters,
+    ReconstructionCounts,
+    clue_labels,
+    event_counts,
+    print_reconstruction_report,
+)
 from evaluate import evaluate_loader, load_model, print_report
 from losses import build_loss
 from train.geo_train import (
@@ -55,40 +63,34 @@ def sample_pair_scores(
     return -distances, same_shower
 
 
-def collect_pair_scores(
+class EventEmbedding(NamedTuple):
+    embeddings: Tensor
+    labels: Tensor
+    energy: Tensor
+
+
+def iter_event_embeddings(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
-    pairs_per_event: int,
-    seed: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> Iterator[EventEmbedding]:
 
     model.eval()
-    generator = torch.Generator().manual_seed(seed)
-    all_scores: list[Tensor] = []
-    all_labels: list[Tensor] = []
 
     with no_grad():
         for cpu_batch in loader:
             batch: Any = cpu_batch.to(device)
             embeddings = model(batch).float().cpu()
-            labels = batch.y.cpu()
             event_sizes = torch.bincount(batch.batch).tolist()
 
-            for event_embeddings, event_labels in zip(
-                torch.split(embeddings, event_sizes),
-                torch.split(labels, event_sizes),
-            ):
-                scores, same_shower = sample_pair_scores(
-                    event_embeddings, event_labels, pairs_per_event, generator
+            yield from (
+                EventEmbedding(*event)
+                for event in zip(
+                    torch.split(embeddings, event_sizes),
+                    torch.split(batch.y.cpu(), event_sizes),
+                    torch.split(batch.energy.cpu(), event_sizes),
                 )
-                all_scores.append(scores)
-                all_labels.append(same_shower)
-
-    return (
-        torch.cat(all_scores).numpy().astype(np.float32),
-        torch.cat(all_labels).numpy().astype(np.int8),
-    )
+            )
 
 
 def plot_roc(scores: np.ndarray, labels: np.ndarray, output_path: Path) -> float:
@@ -118,6 +120,7 @@ def evaluate(
     checkpoint: Path,
     roc_path: Path | None,
     pairs_per_event: int,
+    clue_parameters: ClueParameters,
 ) -> None:
 
     train_config = TrainConfig(batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
@@ -132,15 +135,35 @@ def evaluate(
         f"{SPLIT} (all samples)", evaluate_loader(model, loader, loss_fn, device)
     )
 
+    event_loader = build_loader(split_files, train_config, device.type == "cuda")
+    generator = torch.Generator().manual_seed(train_config.seed)
+    counts = ReconstructionCounts()
+    pair_scores: list[Tensor] = []
+    pair_labels: list[Tensor] = []
+
+    for event in iter_event_embeddings(model, event_loader, device):
+        reco_labels = clue_labels(event.embeddings, clue_parameters)
+        counts.add(event_counts(reco_labels, event.labels, event.energy))
+
+        if roc_path is not None:
+            scores, same_shower = sample_pair_scores(
+                event.embeddings, event.labels, pairs_per_event, generator
+            )
+            pair_scores.append(scores)
+            pair_labels.append(same_shower)
+
+    print_reconstruction_report(SPLIT, counts)
+
     if roc_path is None:
         return
 
-    roc_loader = build_loader(split_files, train_config, device.type == "cuda")
-    scores, labels = collect_pair_scores(
-        model, roc_loader, device, pairs_per_event, train_config.seed
+    scores_array = torch.cat(pair_scores).numpy().astype(np.float32)
+    labels_array = torch.cat(pair_labels).numpy().astype(np.int8)
+    auc = plot_roc(scores_array, labels_array, roc_path)
+    print(
+        f"\nROC pairs: {len(labels_array)} | "
+        f"same-shower fraction: {labels_array.mean():.4f}"
     )
-    auc = plot_roc(scores, labels, roc_path)
-    print(f"\nROC pairs: {len(labels)} | same-shower fraction: {labels.mean():.4f}")
     print(f"ROC AUC: {auc:.4f} | saved to {roc_path}")
 
 
@@ -151,6 +174,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--roc", action="store_true")
     parser.add_argument("--roc-output", type=Path, default=ROC_PATH)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
+    parser.add_argument(
+        "--density-radius", type=float, default=ClueParameters().density_radius
+    )
+    parser.add_argument(
+        "--min-density", type=float, default=ClueParameters().min_density
+    )
+    parser.add_argument(
+        "--seeding-distance", type=float, default=ClueParameters().seeding_distance
+    )
+    parser.add_argument(
+        "--outlier-distance", type=float, default=ClueParameters().outlier_distance
+    )
 
     return parser.parse_args()
 
@@ -162,4 +197,10 @@ if __name__ == "__main__":
         Path(args.checkpoint),
         Path(args.roc_output) if args.roc else None,
         int(args.pairs_per_event),
+        ClueParameters(
+            density_radius=float(args.density_radius),
+            min_density=float(args.min_density),
+            seeding_distance=float(args.seeding_distance),
+            outlier_distance=float(args.outlier_distance),
+        ),
     )
