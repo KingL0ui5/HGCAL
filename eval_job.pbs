@@ -1,5 +1,7 @@
 #!/bin/bash
 #PBS -N eval_model
+#PBS -o evals/data/logs/
+#PBS -e evals/data/logs/
 #PBS -l select=1:ncpus=4:mem=24gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=01:00:00
 
@@ -22,10 +24,13 @@ if [ ! -f "$CHECKPOINT" ]; then
     exit 1
 fi
 
+LOSS_NAME="$(basename "$CHECKPOINT" | sed -nE 's/^geo_(.+)_[0-9]{8}_[0-9]{6}_(best|last)\.pt$/\1/p')"
+LOSS_NAME="${LOSS_NAME:-unknown}"
+
 mkdir -p evals/data
 
 uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${PBS_JOBID}.out"
+.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${LOSS_NAME}_${PBS_JOBID}.out"

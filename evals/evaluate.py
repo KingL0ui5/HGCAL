@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,8 @@ from train.geo_train import (
     build_loader,
 )
 from train.train import select_device
+
+CHECKPOINT_LOSS_PATTERN = re.compile(r"^geo_(?P<loss>.+?)_\d{8}_\d{6}")
 
 
 @dataclass
@@ -123,6 +126,17 @@ def load_run_config(checkpoint: Path) -> dict[str, Any]:
         return {}
 
     return json.loads(config_path.read_text())
+
+
+def checkpoint_loss_name(checkpoint: Path) -> str:
+    configured_loss = load_run_config(checkpoint).get("loss", {}).get("name")
+
+    if configured_loss:
+        return str(configured_loss)
+
+    match = CHECKPOINT_LOSS_PATTERN.match(checkpoint.stem)
+
+    return match.group("loss") if match else "unknown"
 
 
 def load_model(

@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
 from evals.evaluate import (
+    checkpoint_loss_name,
     evaluate_loader,
     event_geometry,
     load_model,
@@ -49,12 +50,14 @@ MODEL_PATH = (
     / "geo_discriminative_20261109_143754_best.pt"
 )
 EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
-ROC_PATH = EVAL_DATA_DIR / "geo_transformer_roc.png"
-STRATIFIED_PATH = EVAL_DATA_DIR / "geo_transformer_by_multiplicity.png"
 SPLIT = "test"
 BATCH_SIZE = 1
 NUM_WORKERS = 2
 PAIRS_PER_EVENT = 20_000
+
+
+def output_path(loss_name: str, kind: str) -> Path:
+    return EVAL_DATA_DIR / f"geo_transformer_{loss_name}_{kind}.png"
 
 
 def sample_pair_scores(
@@ -220,8 +223,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=MODEL_PATH)
     parser.add_argument("--device", default=str(select_device()))
     parser.add_argument("--roc", action="store_true")
-    parser.add_argument("--roc-output", type=Path, default=ROC_PATH)
-    parser.add_argument("--stratified-output", type=Path, default=STRATIFIED_PATH)
+    parser.add_argument("--roc-output", type=Path, default=None)
+    parser.add_argument("--stratified-output", type=Path, default=None)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
     parser.add_argument(
         "--density-radius", type=float, default=ClueParameters().density_radius
@@ -241,11 +244,21 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    checkpoint = Path(args.checkpoint)
+    loss_name = checkpoint_loss_name(checkpoint)
+    roc_output = (
+        Path(args.roc_output) if args.roc_output else output_path(loss_name, "roc")
+    )
+    stratified_output = (
+        Path(args.stratified_output)
+        if args.stratified_output
+        else output_path(loss_name, "by_multiplicity")
+    )
     evaluate(
         torch.device(str(args.device)),
-        Path(args.checkpoint),
-        Path(args.roc_output) if args.roc else None,
-        Path(args.stratified_output),
+        checkpoint,
+        roc_output if args.roc else None,
+        stratified_output,
         int(args.pairs_per_event),
         ClueParameters(
             density_radius=float(args.density_radius),

@@ -39,8 +39,7 @@ MODEL_PATH = (
     / "model_20261108_184730.pt"
 )
 EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
-ROC_PATH = EVAL_DATA_DIR / "transformer_roc.png"
-STRATIFIED_PATH = EVAL_DATA_DIR / "transformer_by_multiplicity.png"
+LOSS_NAME = "crossentropy"
 SPLIT = "test"
 BATCH_SIZE = 8
 PAIRS_PER_EVENT = 20_000
@@ -75,6 +74,10 @@ class ClassificationStats:
     @property
     def majority_baseline(self) -> float:
         return int(self.slot_counts.max().item()) / max(self.n_points, 1)
+
+
+def output_path(source: str, kind: str) -> Path:
+    return EVAL_DATA_DIR / f"transformer_{LOSS_NAME}_{source}_{kind}.png"
 
 
 def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
@@ -277,8 +280,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default=str(select_device()))
     parser.add_argument("--embedding", choices=EMBEDDING_SOURCES, default="hidden")
     parser.add_argument("--roc", action="store_true")
-    parser.add_argument("--roc-output", type=Path, default=ROC_PATH)
-    parser.add_argument("--stratified-output", type=Path, default=STRATIFIED_PATH)
+    parser.add_argument("--roc-output", type=Path, default=None)
+    parser.add_argument("--stratified-output", type=Path, default=None)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-events", type=int, default=None)
@@ -300,12 +303,21 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    source = str(args.embedding)
+    roc_output = (
+        Path(args.roc_output) if args.roc_output else output_path(source, "roc")
+    )
+    stratified_output = (
+        Path(args.stratified_output)
+        if args.stratified_output
+        else output_path(source, "by_multiplicity")
+    )
     evaluate(
         torch.device(str(args.device)),
         Path(args.checkpoint),
-        str(args.embedding),
-        Path(args.roc_output) if args.roc else None,
-        Path(args.stratified_output),
+        source,
+        roc_output if args.roc else None,
+        stratified_output,
         int(args.pairs_per_event),
         int(args.num_workers),
         int(args.max_events) if args.max_events is not None else None,

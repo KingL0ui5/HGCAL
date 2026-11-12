@@ -699,6 +699,37 @@ wheels = [
 ]
 
 [[package]]
+name = "cluestering"
+version = "2.14.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-learn", version = "1.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/69/177b10ead0df2c8ab1c6ab06398060b0e2fbc27cde6ba3c1b0103e3c4b6d/cluestering-2.14.2.tar.gz", hash = "sha256:defbf747edbda9ca01efd9c1283a6e061ff78c615a4a6a5ec1a1d49413801d6d", size = 1287878, upload-time = "2026-11-09T12:01:22.352Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/75/2c6a7aae57ec55ce1921c6ea6396bba105003af8360a209d2d5f625b9f99/cluestering-2.14.2-cp310-cp310-manylinux_2_34_aarch64.whl", hash = "sha256:87ae7b6441b7abe4db91eaa41f124bc01ceb913fd09d25e06e08d89c2872cd86", size = 890834, upload-time = "2026-11-09T12:00:56.039Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/56/57d70df023b972e9c3d2fb53326d623f119e1b5c899f90da4c21bf461052/cluestering-2.14.2-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:ce03e026ab14dc3bb69b0b89f5e7a6fdbc391a2891871f5a89790076a2b869f1", size = 1071691, upload-time = "2026-11-09T12:00:58.124Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/e0/4e903e4240bb5e362439709ffc41b892ea70af6249544fe82a28d4bd7ac9/cluestering-2.14.2-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:e49d9d6783ecdc26d8e2d324e313518bd7d6b2feab3dfd23f62bada7b22ad1fe", size = 890247, upload-time = "2026-11-09T12:00:59.805Z" },
+    { url = "https://files.pythonhosted.org/packages/da/53/eea0a0bf04e07e142b90b0bdf0cc19a8d406ed45873bb0892f9b7d62a8a5/cluestering-2.14.2-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:2fe8c86d4b299da14d1d2c7b5b1588fccc5d6e6dee4796abfa458ba8ffca3dc3", size = 1070985, upload-time = "2026-11-09T12:01:02.033Z" },
+    { url = "https://files.pythonhosted.org/packages/90/b7/f9f2045e2f0e87d4c15264c554bd2cac7376188e35c9171177989eb52df4/cluestering-2.14.2-cp312-cp312-manylinux_2_34_aarch64.whl", hash = "sha256:e85c57dea8b03763b79122b779616b8dcd3aecd21b82c53851be3a5eb767d22a", size = 886297, upload-time = "2026-11-09T12:01:03.966Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/a9/9e5b23aa3aec8c8413aa670ee31e84ff67455dd2be7defac5c219b0dee08/cluestering-2.14.2-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:45c31f53ee00180011107946846e0f9bf87adcd9959236b043e442187b6a120d", size = 1069256, upload-time = "2026-11-09T12:01:05.626Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/80/7262d2fcc29c74dfef03948d18f6447bf1a9b9a89713f23ae285adbcd2b1/cluestering-2.14.2-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:19675cd1dd57234c964e20dfd24cf33ce3672c3c2420cda085678de9e584d2cb", size = 886022, upload-time = "2026-11-09T12:01:07.881Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/b9/52ce74b7484495c8171d93bea8ba7c0682dba33a0ecf5419c11ba51a4be0/cluestering-2.14.2-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:9d2d12457e3b21bdc06a51ec9ad0532cfc36add5da34a2cb3dfae49f3c4895fa", size = 1069196, upload-time = "2026-11-09T12:01:09.399Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/c3/4d736d737e1eac67b0b9b3ec85fd7b654cb8c300587dbdaa840691f870c8/cluestering-2.14.2-cp314-cp314-manylinux_2_34_aarch64.whl", hash = "sha256:3186e714c4234953479f06662f40283a6a755d211c4fb8367c09f3e4cffb0f7d", size = 886945, upload-time = "2026-11-09T12:01:11.099Z" },
+    { url = "https://files.pythonhosted.org/packages/85/4f/e99eb6eb14e5e72af7913ed148005bfe0928ccdda7ffdd4d1af0680b3a59/cluestering-2.14.2-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:ddde2a03f34ba69fe1f3061c1f406854feaaa1460c4217cb129c1b6dce589410", size = 1069557, upload-time = "2026-11-09T12:01:12.736Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/b6/72cd4e5bec70506fd8dd0d1ce62f4163d6f2dc99480c57658828e13c463c/cluestering-2.14.2-cp315-cp315-manylinux_2_34_aarch64.whl", hash = "sha256:6d9fdb43eec233817374d745656619d797a2515ae9651cf31d61f2ca0034ca01", size = 887129, upload-time = "2026-11-09T12:01:14.853Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/d7/2b0784d3035332d14c93c691b1e607cb4c4e93f4605f9d18db9fecec0d12/cluestering-2.14.2-cp315-cp315-manylinux_2_34_x86_64.whl", hash = "sha256:1cec8d79414f4447b588246e312057cc4d14d36a951c2f40a56f73102d1fc53e", size = 1069559, upload-time = "2026-11-09T12:01:16.967Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1631,6 +1662,7 @@ name = "hgcal"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cluestering", marker = "sys_platform == 'linux'" },
     { name = "jupyter" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1658,6 +1690,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cluestering", marker = "sys_platform == 'linux'", specifier = ">=2.14.2" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "numpy", specifier = ">=2.2.6" },
