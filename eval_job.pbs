@@ -15,10 +15,10 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-CHECKPOINT="${CHECKPOINT:-trained_models/geo_discriminative_20261109_143754_best.pt}"
+CHECKPOINT="${CHECKPOINT:-$(ls -t trained_models/geo_infonce_*_best.pt 2>/dev/null | head -n 1 || true)}"
 
 if [ ! -f "$CHECKPOINT" ]; then
-    echo "checkpoint not found: $CHECKPOINT (submit with: qsub -v CHECKPOINT=<path> eval_job.pbs)" >&2
+    echo "no geo_infonce checkpoint found in trained_models/ (train first, or submit with: qsub -v CHECKPOINT=<path> eval_job.pbs)" >&2
     exit 1
 fi
 
@@ -28,4 +28,4 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${PBS_JOBID}.out"
+.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${PBS_JOBID}.out"
