@@ -1,0 +1,27 @@
+cuda available: True
+
+== test (all samples) ==
+events:                   800
+points:                   1292154
+loss:                     0.6009
+mean intra-cluster dist:  0.6674
+mean centroid separation: 1.3123
+
+== test: reconstruction ==
+N_sim:                2800
+N_reco:               1173
+efficiency:           0.9893
+purity:               0.5098
+multiplicity ratio:   0.4189
+
+ROC pairs: 15987563 | same-shower fraction: 0.3994
+ROC AUC: 0.7600 | saved to /rds/general/user/ll3023/home/HGCAL/evals/geo_transformer_roc.png
+
+====================================
+CPU Time used: 00:01:26
+CPU Percent: 60%
+Memory usage: 3261372kb
+Approx Power usage: 0.0002
+Walltime usage: 00:08:15
+
+====================================

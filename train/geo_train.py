@@ -44,7 +44,7 @@ class ModelConfig:
 
 @dataclass
 class LossConfig:
-    name: str = "discriminative"
+    name: str = "infonce"
     kwargs: dict[str, float] = field(default_factory=dict)
 
 
