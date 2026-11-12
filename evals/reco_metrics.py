@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-from functools import cache
 
 import numpy as np
 import torch
 from torch import Tensor
 
-from clustering.clue import probe_backend, run_clue
+from clustering.agglomerative import run_agglomerative
 
 MATCH_ENERGY_FRACTION = 0.7
 PURE_SCORE_THRESHOLD = 0.2
@@ -13,11 +12,11 @@ NOISE_LABEL = -1
 
 
 @dataclass
-class ClueParameters:
-    density_radius: float = 0.5
-    min_density: float = 5.0
-    seeding_distance: float = 1.5
-    outlier_distance: float = 1.5
+class ClusteringParameters:
+    distance_threshold: float = 0.05
+    method: str = "average"
+    metric: str = "cosine"
+    min_cluster_size: int = 1
 
 
 @dataclass
@@ -46,23 +45,27 @@ class ReconstructionCounts:
         return self.n_reco / max(self.n_sim, 1)
 
 
-@cache
-def clue_backend() -> str:
-    return probe_backend()
+def drop_small_clusters(labels: Tensor, min_cluster_size: int) -> Tensor:
+    if min_cluster_size <= 1:
+        return labels
+
+    _, inverse, counts = torch.unique(labels, return_inverse=True, return_counts=True)
+    is_small = (counts < min_cluster_size)[inverse]
+
+    return labels.masked_fill(is_small, NOISE_LABEL)
 
 
-def clue_labels(embeddings: Tensor, parameters: ClueParameters) -> Tensor:
-    result = run_clue(
-        embeddings.detach().cpu().numpy().astype(np.float32),
-        np.ones(embeddings.shape[0], dtype=np.float32),
-        dc=parameters.density_radius,
-        rhoc=parameters.min_density,
-        do=parameters.outlier_distance,
-        dm=parameters.seeding_distance,
-        backend=clue_backend(),
+def cluster_labels(embeddings: Tensor, parameters: ClusteringParameters) -> Tensor:
+    labels = run_agglomerative(
+        embeddings.detach().cpu().numpy(),
+        parameters.distance_threshold,
+        method=parameters.method,
+        metric=parameters.metric,
     )
 
-    return torch.from_numpy(result.cluster_ids.astype(np.int64))
+    return drop_small_clusters(
+        torch.from_numpy(labels.astype(np.int64)), parameters.min_cluster_size
+    )
 
 
 def event_counts(

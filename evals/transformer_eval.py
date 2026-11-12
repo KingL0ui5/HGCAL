@@ -18,9 +18,9 @@ from torch.utils.data import DataLoader
 
 from data import DATA_PATH, IGNORE_LABEL, get_splits_by_file
 from evals.reco_metrics import (
-    ClueParameters,
+    ClusteringParameters,
     ReconstructionCounts,
-    clue_labels,
+    cluster_labels,
     event_counts,
     print_reconstruction_report,
 )
@@ -202,7 +202,7 @@ def evaluate(
     pairs_per_event: int,
     num_workers: int,
     max_events: int | None,
-    clue_parameters: ClueParameters,
+    clustering_parameters: ClusteringParameters,
 ) -> None:
 
     train_config = TrainConfig(batch_size=BATCH_SIZE, num_workers=num_workers)
@@ -223,7 +223,9 @@ def evaluate(
         embeddings = select_embeddings(event, source)
         multiplicity = event_multiplicity(event.labels)
         event_reconstruction = event_counts(
-            clue_labels(embeddings, clue_parameters), event.labels, event.energy
+            cluster_labels(embeddings, clustering_parameters),
+            event.labels,
+            event.energy,
         )
         classification.add(event.logits, event.labels)
         classification_by_multiplicity.setdefault(
@@ -286,16 +288,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-events", type=int, default=None)
     parser.add_argument(
-        "--density-radius", type=float, default=ClueParameters().density_radius
+        "--distance-threshold",
+        type=float,
+        default=ClusteringParameters().distance_threshold,
     )
+    parser.add_argument("--linkage-method", default=ClusteringParameters().method)
+    parser.add_argument("--metric", default=ClusteringParameters().metric)
     parser.add_argument(
-        "--min-density", type=float, default=ClueParameters().min_density
-    )
-    parser.add_argument(
-        "--seeding-distance", type=float, default=ClueParameters().seeding_distance
-    )
-    parser.add_argument(
-        "--outlier-distance", type=float, default=ClueParameters().outlier_distance
+        "--min-cluster-size", type=int, default=ClusteringParameters().min_cluster_size
     )
 
     return parser.parse_args()
@@ -321,10 +321,10 @@ if __name__ == "__main__":
         int(args.pairs_per_event),
         int(args.num_workers),
         int(args.max_events) if args.max_events is not None else None,
-        ClueParameters(
-            density_radius=float(args.density_radius),
-            min_density=float(args.min_density),
-            seeding_distance=float(args.seeding_distance),
-            outlier_distance=float(args.outlier_distance),
+        ClusteringParameters(
+            distance_threshold=float(args.distance_threshold),
+            method=str(args.linkage_method),
+            metric=str(args.metric),
+            min_cluster_size=int(args.min_cluster_size),
         ),
     )

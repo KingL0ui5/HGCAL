@@ -23,9 +23,9 @@ from evals.evaluate import (
     print_report,
 )
 from evals.reco_metrics import (
-    ClueParameters,
+    ClusteringParameters,
     ReconstructionCounts,
-    clue_labels,
+    cluster_labels,
     event_counts,
     print_reconstruction_report,
 )
@@ -138,7 +138,7 @@ def evaluate(
     roc_path: Path | None,
     stratified_path: Path,
     pairs_per_event: int,
-    clue_parameters: ClueParameters,
+    clustering_parameters: ClusteringParameters,
 ) -> None:
 
     train_config = TrainConfig(batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
@@ -163,7 +163,7 @@ def evaluate(
     pair_labels: list[Tensor] = []
 
     for event in iter_event_embeddings(model, event_loader, device):
-        reco_labels = clue_labels(event.embeddings, clue_parameters)
+        reco_labels = cluster_labels(event.embeddings, clustering_parameters)
         event_reconstruction = event_counts(reco_labels, event.labels, event.energy)
         counts.add(event_reconstruction)
         multiplicity = event_multiplicity(event.labels)
@@ -227,16 +227,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stratified-output", type=Path, default=None)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
     parser.add_argument(
-        "--density-radius", type=float, default=ClueParameters().density_radius
+        "--distance-threshold",
+        type=float,
+        default=ClusteringParameters().distance_threshold,
     )
+    parser.add_argument("--linkage-method", default=ClusteringParameters().method)
+    parser.add_argument("--metric", default=ClusteringParameters().metric)
     parser.add_argument(
-        "--min-density", type=float, default=ClueParameters().min_density
-    )
-    parser.add_argument(
-        "--seeding-distance", type=float, default=ClueParameters().seeding_distance
-    )
-    parser.add_argument(
-        "--outlier-distance", type=float, default=ClueParameters().outlier_distance
+        "--min-cluster-size", type=int, default=ClusteringParameters().min_cluster_size
     )
 
     return parser.parse_args()
@@ -260,10 +258,10 @@ if __name__ == "__main__":
         roc_output if args.roc else None,
         stratified_output,
         int(args.pairs_per_event),
-        ClueParameters(
-            density_radius=float(args.density_radius),
-            min_density=float(args.min_density),
-            seeding_distance=float(args.seeding_distance),
-            outlier_distance=float(args.outlier_distance),
+        ClusteringParameters(
+            distance_threshold=float(args.distance_threshold),
+            method=str(args.linkage_method),
+            metric=str(args.metric),
+            min_cluster_size=int(args.min_cluster_size),
         ),
     )
