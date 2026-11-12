@@ -1,7 +1,11 @@
 from dataclasses import dataclass
+from functools import cache
 
+import numpy as np
 import torch
 from torch import Tensor
+
+from clustering.clue import probe_backend, run_clue
 
 MATCH_ENERGY_FRACTION = 0.7
 PURE_SCORE_THRESHOLD = 0.2
@@ -42,36 +46,23 @@ class ReconstructionCounts:
         return self.n_reco / max(self.n_sim, 1)
 
 
-def clue_labels(embeddings: Tensor, parameters: ClueParameters) -> Tensor:
-    distances = torch.cdist(embeddings, embeddings)
-    density = (distances < parameters.density_radius).sum(dim=1).to(torch.float32)
+@cache
+def clue_backend() -> str:
+    return probe_backend()
 
-    order = torch.argsort(density, descending=True, stable=True)
-    position = torch.empty_like(order)
-    position[order] = torch.arange(order.numel(), dtype=order.dtype)
-    is_higher = position.unsqueeze(0) < position.unsqueeze(1)
-    nearest_distance, nearest_higher = distances.masked_fill(~is_higher, torch.inf).min(
-        dim=1
+
+def clue_labels(embeddings: Tensor, parameters: ClueParameters) -> Tensor:
+    result = run_clue(
+        embeddings.detach().cpu().numpy().astype(np.float32),
+        np.ones(embeddings.shape[0], dtype=np.float32),
+        dc=parameters.density_radius,
+        rhoc=parameters.min_density,
+        do=parameters.outlier_distance,
+        dm=parameters.seeding_distance,
+        backend=clue_backend(),
     )
 
-    is_dense = density >= parameters.min_density
-    is_seed = (is_dense & (nearest_distance > parameters.seeding_distance)).tolist()
-    is_outlier = (~is_dense & (nearest_distance > parameters.outlier_distance)).tolist()
-    nearest_list = nearest_higher.tolist()
-
-    labels = [NOISE_LABEL] * embeddings.shape[0]
-    n_clusters = 0
-
-    for point in order.tolist():
-        if is_seed[point]:
-            labels[point] = n_clusters
-            n_clusters += 1
-        elif is_outlier[point]:
-            labels[point] = NOISE_LABEL
-        else:
-            labels[point] = labels[nearest_list[point]]
-
-    return torch.tensor(labels, dtype=torch.long)
+    return torch.from_numpy(result.cluster_ids.astype(np.int64))
 
 
 def event_counts(

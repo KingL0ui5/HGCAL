@@ -15,13 +15,24 @@ from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
-from evals.evaluate import evaluate_loader, load_model, print_report
+from evals.evaluate import (
+    evaluate_loader,
+    event_geometry,
+    load_model,
+    print_report,
+)
 from evals.reco_metrics import (
     ClueParameters,
     ReconstructionCounts,
     clue_labels,
     event_counts,
     print_reconstruction_report,
+)
+from evals.stratified import (
+    StratifiedReconstruction,
+    event_multiplicity,
+    plot_by_multiplicity,
+    print_stratified_table,
 )
 from losses import build_loss
 from train.geo_train import (
@@ -37,7 +48,9 @@ MODEL_PATH = (
     / "trained_models"
     / "geo_discriminative_20261109_143754_best.pt"
 )
-ROC_PATH = Path(__file__).resolve().parent / "geo_transformer_roc.png"
+EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
+ROC_PATH = EVAL_DATA_DIR / "geo_transformer_roc.png"
+STRATIFIED_PATH = EVAL_DATA_DIR / "geo_transformer_by_multiplicity.png"
 SPLIT = "test"
 BATCH_SIZE = 1
 NUM_WORKERS = 2
@@ -109,6 +122,7 @@ def plot_roc(scores: np.ndarray, labels: np.ndarray, output_path: Path) -> float
     axis.set_title(f"Same-shower pair ROC ({SPLIT} split)")
     axis.legend(loc="lower right")
     figure.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
     plt.close(figure)
 
@@ -119,6 +133,7 @@ def evaluate(
     device: torch.device,
     checkpoint: Path,
     roc_path: Path | None,
+    stratified_path: Path,
     pairs_per_event: int,
     clue_parameters: ClueParameters,
 ) -> None:
@@ -138,12 +153,25 @@ def evaluate(
     event_loader = build_loader(split_files, train_config, device.type == "cuda")
     generator = torch.Generator().manual_seed(train_config.seed)
     counts = ReconstructionCounts()
+    stratified = StratifiedReconstruction()
+    intra_by_multiplicity: dict[int, list[float]] = {}
+    separation_by_multiplicity: dict[int, list[float]] = {}
     pair_scores: list[Tensor] = []
     pair_labels: list[Tensor] = []
 
     for event in iter_event_embeddings(model, event_loader, device):
         reco_labels = clue_labels(event.embeddings, clue_parameters)
-        counts.add(event_counts(reco_labels, event.labels, event.energy))
+        event_reconstruction = event_counts(reco_labels, event.labels, event.energy)
+        counts.add(event_reconstruction)
+        multiplicity = event_multiplicity(event.labels)
+        intra_distance, separation = event_geometry(event.embeddings, event.labels)
+        intra_by_multiplicity.setdefault(multiplicity, []).append(intra_distance)
+
+        if separation is not None:
+            separation_by_multiplicity.setdefault(multiplicity, []).append(separation)
+
+        scores: Tensor | None = None
+        same_shower: Tensor | None = None
 
         if roc_path is not None:
             scores, same_shower = sample_pair_scores(
@@ -152,7 +180,27 @@ def evaluate(
             pair_scores.append(scores)
             pair_labels.append(same_shower)
 
+        stratified.add(multiplicity, event_reconstruction, scores, same_shower)
+
     print_reconstruction_report(SPLIT, counts)
+
+    stratified_metrics = stratified.metrics()
+    stratified_metrics["intra-cluster distance"] = {
+        key: float(np.mean(values))
+        for key, values in sorted(intra_by_multiplicity.items())
+    }
+    stratified_metrics["centroid separation"] = {
+        key: float(np.mean(values))
+        for key, values in sorted(separation_by_multiplicity.items())
+    }
+    print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
+    plot_by_multiplicity(
+        stratified_metrics,
+        stratified.n_events,
+        f"GeoTransformer ({SPLIT})",
+        stratified_path,
+    )
+    print(f"stratified plot saved to {stratified_path}")
 
     if roc_path is None:
         return
@@ -173,6 +221,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default=str(select_device()))
     parser.add_argument("--roc", action="store_true")
     parser.add_argument("--roc-output", type=Path, default=ROC_PATH)
+    parser.add_argument("--stratified-output", type=Path, default=STRATIFIED_PATH)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
     parser.add_argument(
         "--density-radius", type=float, default=ClueParameters().density_radius
@@ -196,6 +245,7 @@ if __name__ == "__main__":
         torch.device(str(args.device)),
         Path(args.checkpoint),
         Path(args.roc_output) if args.roc else None,
+        Path(args.stratified_output),
         int(args.pairs_per_event),
         ClueParameters(
             density_radius=float(args.density_radius),

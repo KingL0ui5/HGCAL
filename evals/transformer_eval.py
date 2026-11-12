@@ -24,6 +24,12 @@ from evals.reco_metrics import (
     event_counts,
     print_reconstruction_report,
 )
+from evals.stratified import (
+    StratifiedReconstruction,
+    event_multiplicity,
+    plot_by_multiplicity,
+    print_stratified_table,
+)
 from models.transformer import ModelConfig, TransformerModel
 from train.train import TrainConfig, batch_to_device, build_loader, select_device
 
@@ -32,7 +38,9 @@ MODEL_PATH = (
     / "trained_models"
     / "model_20261108_184730.pt"
 )
-ROC_PATH = Path(__file__).resolve().parent / "transformer_roc.png"
+EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
+ROC_PATH = EVAL_DATA_DIR / "transformer_roc.png"
+STRATIFIED_PATH = EVAL_DATA_DIR / "transformer_by_multiplicity.png"
 SPLIT = "test"
 BATCH_SIZE = 8
 PAIRS_PER_EVENT = 20_000
@@ -167,6 +175,7 @@ def plot_roc(
     axis.set_title(f"Same-shower pair ROC ({SPLIT} split)")
     axis.legend(loc="lower right")
     figure.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
     plt.close(figure)
 
@@ -186,6 +195,7 @@ def evaluate(
     checkpoint: Path,
     source: str,
     roc_path: Path | None,
+    stratified_path: Path,
     pairs_per_event: int,
     num_workers: int,
     max_events: int | None,
@@ -199,6 +209,8 @@ def evaluate(
 
     generator = torch.Generator().manual_seed(train_config.seed)
     classification = ClassificationStats()
+    classification_by_multiplicity: dict[int, ClassificationStats] = {}
+    stratified = StratifiedReconstruction()
     counts = ReconstructionCounts()
     pair_scores: list[Tensor] = []
     pair_labels: list[Tensor] = []
@@ -206,13 +218,18 @@ def evaluate(
 
     for event in iter_events(model, loader, device, max_events):
         embeddings = select_embeddings(event, source)
-        classification.add(event.logits, event.labels)
-        counts.add(
-            event_counts(
-                clue_labels(embeddings, clue_parameters), event.labels, event.energy
-            )
+        multiplicity = event_multiplicity(event.labels)
+        event_reconstruction = event_counts(
+            clue_labels(embeddings, clue_parameters), event.labels, event.energy
         )
+        classification.add(event.logits, event.labels)
+        classification_by_multiplicity.setdefault(
+            multiplicity, ClassificationStats()
+        ).add(event.logits, event.labels)
+        counts.add(event_reconstruction)
         n_events += 1
+        scores: Tensor | None = None
+        same_shower: Tensor | None = None
 
         if roc_path is not None:
             scores, same_shower = sample_pair_scores(
@@ -221,9 +238,25 @@ def evaluate(
             pair_scores.append(scores)
             pair_labels.append(same_shower)
 
+        stratified.add(multiplicity, event_reconstruction, scores, same_shower)
+
     print(f"events: {n_events} | embedding source: {source} (L2-normalised)")
     print_classification_report(classification)
     print_reconstruction_report(SPLIT, counts)
+
+    stratified_metrics = stratified.metrics()
+    stratified_metrics["slot accuracy"] = {
+        key: classification_by_multiplicity[key].accuracy
+        for key in sorted(classification_by_multiplicity)
+    }
+    print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
+    plot_by_multiplicity(
+        stratified_metrics,
+        stratified.n_events,
+        f"Transformer {source} ({SPLIT})",
+        stratified_path,
+    )
+    print(f"stratified plot saved to {stratified_path}")
 
     if roc_path is None:
         return
@@ -245,6 +278,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding", choices=EMBEDDING_SOURCES, default="hidden")
     parser.add_argument("--roc", action="store_true")
     parser.add_argument("--roc-output", type=Path, default=ROC_PATH)
+    parser.add_argument("--stratified-output", type=Path, default=STRATIFIED_PATH)
     parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-events", type=int, default=None)
@@ -271,6 +305,7 @@ if __name__ == "__main__":
         Path(args.checkpoint),
         str(args.embedding),
         Path(args.roc_output) if args.roc else None,
+        Path(args.stratified_output),
         int(args.pairs_per_event),
         int(args.num_workers),
         int(args.max_events) if args.max_events is not None else None,

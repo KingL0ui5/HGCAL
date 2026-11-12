@@ -15,15 +15,17 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-CHECKPOINT="${CHECKPOINT:-models/geo_discriminative_20261109_143754_best.pt}"
+CHECKPOINT="${CHECKPOINT:-trained_models/geo_discriminative_20261109_143754_best.pt}"
 
 if [ ! -f "$CHECKPOINT" ]; then
     echo "checkpoint not found: $CHECKPOINT (submit with: qsub -v CHECKPOINT=<path> eval_job.pbs)" >&2
     exit 1
 fi
 
+mkdir -p evals/data
+
 uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" --roc
+.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${PBS_JOBID}.out"
