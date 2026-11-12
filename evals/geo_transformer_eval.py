@@ -15,6 +15,7 @@ from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
+from evals.evaluate import evaluate_loader, load_model, print_report
 from evals.reco_metrics import (
     ClueParameters,
     ReconstructionCounts,
@@ -22,7 +23,6 @@ from evals.reco_metrics import (
     event_counts,
     print_reconstruction_report,
 )
-from evaluate import evaluate_loader, load_model, print_report
 from losses import build_loss
 from train.geo_train import (
     LossConfig,

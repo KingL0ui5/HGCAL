@@ -26,4 +26,4 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT" --roc
+.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" --roc
