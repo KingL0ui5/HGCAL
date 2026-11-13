@@ -5,3 +5,4 @@ __pycache__/
 trained_models/
 *.pt
 untracked/
+evals/data/
