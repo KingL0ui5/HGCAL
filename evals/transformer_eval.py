@@ -4,19 +4,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn.functional as F
-from sklearn.metrics import roc_auc_score, roc_curve
 from torch import Tensor, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, IGNORE_LABEL, get_splits_by_file
+from evals.embedding_geometry import event_geometry
 from evals.reco_metrics import (
     ClusteringParameters,
     ReconstructionCounts,
@@ -28,7 +22,9 @@ from evals.stratified import (
     StratifiedReconstruction,
     event_multiplicity,
     plot_by_multiplicity,
+    print_geometry_report,
     print_stratified_table,
+    save_metrics,
 )
 from models.transformer import ModelConfig, TransformerModel
 from train.train import TrainConfig, batch_to_device, build_loader, select_device
@@ -42,7 +38,6 @@ EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
 LOSS_NAME = "crossentropy"
 SPLIT = "test"
 BATCH_SIZE = 8
-PAIRS_PER_EVENT = 20_000
 ENERGY_FEATURE_INDEX = 3
 EMBEDDING_SOURCES = ("hidden", "logits")
 
@@ -76,8 +71,8 @@ class ClassificationStats:
         return int(self.slot_counts.max().item()) / max(self.n_points, 1)
 
 
-def output_path(source: str, kind: str) -> Path:
-    return EVAL_DATA_DIR / f"transformer_{LOSS_NAME}_{source}_{kind}.png"
+def output_path(source: str, kind: str, suffix: str = "png") -> Path:
+    return EVAL_DATA_DIR / f"transformer_{LOSS_NAME}_{source}_{kind}.{suffix}"
 
 
 def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
@@ -137,54 +132,6 @@ def select_embeddings(event: EventOutputs, source: str) -> Tensor:
     return F.normalize(raw, dim=1)
 
 
-def sample_pair_scores(
-    embeddings: Tensor,
-    labels: Tensor,
-    n_pairs: int,
-    generator: torch.Generator,
-) -> tuple[Tensor, Tensor]:
-
-    n_points = embeddings.shape[0]
-    first = torch.randint(n_points, (n_pairs,), generator=generator)
-    second = torch.randint(n_points, (n_pairs,), generator=generator)
-    distinct = first != second
-    first, second = first[distinct], second[distinct]
-
-    distances = (embeddings[first] - embeddings[second]).norm(dim=1)
-    same_shower = labels[first] == labels[second]
-
-    return -distances, same_shower
-
-
-def plot_roc(
-    scores: np.ndarray,
-    labels: np.ndarray,
-    source: str,
-    output_path: Path,
-) -> float:
-
-    false_positive_rate, true_positive_rate, _ = roc_curve(labels, scores)
-    auc = float(roc_auc_score(labels, scores))
-
-    figure, axis = plt.subplots(figsize=(5, 5))
-    axis.plot(
-        false_positive_rate,
-        true_positive_rate,
-        label=f"Transformer {source} (AUC = {auc:.4f})",
-    )
-    axis.plot([0, 1], [0, 1], linestyle="--", color="grey", label="random")
-    axis.set_xlabel("False positive rate (different showers paired)")
-    axis.set_ylabel("True positive rate (same-shower pairs recovered)")
-    axis.set_title(f"Same-shower pair ROC ({SPLIT} split)")
-    axis.legend(loc="lower right")
-    figure.tight_layout()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=150)
-    plt.close(figure)
-
-    return auc
-
-
 def print_classification_report(stats: ClassificationStats) -> None:
     print(f"\n== {SPLIT}: slot classification ==")
     print(f"points:               {stats.n_points}")
@@ -197,9 +144,8 @@ def evaluate(
     device: torch.device,
     checkpoint: Path,
     source: str,
-    roc_path: Path | None,
     stratified_path: Path,
-    pairs_per_event: int,
+    metrics_path: Path,
     num_workers: int,
     max_events: int | None,
     clustering_parameters: ClusteringParameters,
@@ -210,13 +156,10 @@ def evaluate(
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[SPLIT]
     loader = build_loader(split_files, train_config, device.type == "cuda")
 
-    generator = torch.Generator().manual_seed(train_config.seed)
     classification = ClassificationStats()
     classification_by_multiplicity: dict[int, ClassificationStats] = {}
     stratified = StratifiedReconstruction()
     counts = ReconstructionCounts()
-    pair_scores: list[Tensor] = []
-    pair_labels: list[Tensor] = []
     n_events = 0
 
     for event in iter_events(model, loader, device, max_events):
@@ -227,27 +170,19 @@ def evaluate(
             event.labels,
             event.energy,
         )
+        intra_distance, separation = event_geometry(embeddings, event.labels)
         classification.add(event.logits, event.labels)
         classification_by_multiplicity.setdefault(
             multiplicity, ClassificationStats()
         ).add(event.logits, event.labels)
         counts.add(event_reconstruction)
         n_events += 1
-        scores: Tensor | None = None
-        same_shower: Tensor | None = None
-
-        if roc_path is not None:
-            scores, same_shower = sample_pair_scores(
-                embeddings, event.labels, pairs_per_event, generator
-            )
-            pair_scores.append(scores)
-            pair_labels.append(same_shower)
-
-        stratified.add(multiplicity, event_reconstruction, scores, same_shower)
+        stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
     print(f"events: {n_events} | embedding source: {source} (L2-normalised)")
     print_classification_report(classification)
     print_reconstruction_report(SPLIT, counts)
+    print_geometry_report(SPLIT, stratified)
 
     stratified_metrics = stratified.metrics()
     stratified_metrics["slot accuracy"] = {
@@ -262,18 +197,8 @@ def evaluate(
         stratified_path,
     )
     print(f"stratified plot saved to {stratified_path}")
-
-    if roc_path is None:
-        return
-
-    scores_array = torch.cat(pair_scores).numpy().astype(np.float32)
-    labels_array = torch.cat(pair_labels).numpy().astype(np.int8)
-    auc = plot_roc(scores_array, labels_array, source, roc_path)
-    print(
-        f"\nROC pairs: {len(labels_array)} | "
-        f"same-shower fraction: {labels_array.mean():.4f}"
-    )
-    print(f"ROC AUC: {auc:.4f} | saved to {roc_path}")
+    save_metrics(stratified_metrics, stratified.n_events, metrics_path)
+    print(f"metrics saved to {metrics_path}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,10 +206,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=MODEL_PATH)
     parser.add_argument("--device", default=str(select_device()))
     parser.add_argument("--embedding", choices=EMBEDDING_SOURCES, default="hidden")
-    parser.add_argument("--roc", action="store_true")
-    parser.add_argument("--roc-output", type=Path, default=None)
     parser.add_argument("--stratified-output", type=Path, default=None)
-    parser.add_argument("--pairs-per-event", type=int, default=PAIRS_PER_EVENT)
+    parser.add_argument("--metrics-output", type=Path, default=None)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-events", type=int, default=None)
     parser.add_argument(
@@ -304,21 +227,22 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     source = str(args.embedding)
-    roc_output = (
-        Path(args.roc_output) if args.roc_output else output_path(source, "roc")
-    )
     stratified_output = (
         Path(args.stratified_output)
         if args.stratified_output
         else output_path(source, "by_multiplicity")
     )
+    metrics_output = (
+        Path(args.metrics_output)
+        if args.metrics_output
+        else output_path(source, "metrics", "json")
+    )
     evaluate(
         torch.device(str(args.device)),
         Path(args.checkpoint),
         source,
-        roc_output if args.roc else None,
         stratified_output,
-        int(args.pairs_per_event),
+        metrics_output,
         int(args.num_workers),
         int(args.max_events) if args.max_events is not None else None,
         ClusteringParameters(

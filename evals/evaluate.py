@@ -1,17 +1,26 @@
 import argparse
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
+from evals.embedding_geometry import event_geometry
+from evals.transformer_eval import (
+    iter_events,
+    select_embeddings,
+)
+from evals.transformer_eval import load_model as load_basic_transformer
 from losses import build_loss
 from models.geo_transformer import GeoTransformer
+from models.transformer import TransformerModel
 from train.geo_train import (
     FEATURE_NAMES,
     GEOMETRIC_FEATURE_INDICES,
@@ -20,8 +29,12 @@ from train.geo_train import (
     TrainConfig,
     build_loader,
 )
+from train.train import TrainConfig as BasicTrainConfig
+from train.train import build_loader as build_basic_loader
 from train.train import select_device
 
+MODEL_CHOICES = ("geo", "transformer")
+BASIC_EMBEDDING_SOURCE = "hidden"
 CHECKPOINT_LOSS_PATTERN = re.compile(r"^geo_(?P<loss>.+?)_\d{8}_\d{6}")
 
 
@@ -46,28 +59,6 @@ def group_by_sample(file_paths: list[Path]) -> dict[str, list[Path]]:
     return dict(sorted(groups.items()))
 
 
-def event_geometry(embeddings: Tensor, labels: Tensor) -> tuple[float, float | None]:
-    _, inverse = torch.unique(labels, return_inverse=True)
-    n_clusters = int(inverse.max().item()) + 1
-    counts = torch.bincount(inverse, minlength=n_clusters).to(embeddings.dtype)
-    centroids = torch.zeros(
-        n_clusters,
-        embeddings.shape[1],
-        dtype=embeddings.dtype,
-        device=embeddings.device,
-    ).index_add_(0, inverse, embeddings)
-    centroids = centroids / counts.unsqueeze(1)
-    intra_distance = float((embeddings - centroids[inverse]).norm(dim=1).mean().item())
-
-    if n_clusters < 2:
-        return intra_distance, None
-
-    pairwise = torch.cdist(centroids, centroids)
-    off_diagonal = ~torch.eye(n_clusters, dtype=torch.bool, device=embeddings.device)
-
-    return intra_distance, float(pairwise[off_diagonal].mean().item())
-
-
 def evaluate_loader(
     model: GeoTransformer,
     loader: DataLoader,
@@ -84,22 +75,46 @@ def evaluate_loader(
             embeddings = model(batch).float()
             stats.loss += float(loss_fn(embeddings, batch).item())
             stats.n_batches += 1
-            stats.n_points += int(embeddings.shape[0])
             event_sizes = torch.bincount(batch.batch).tolist()
 
             for event_embeddings, event_labels in zip(
                 torch.split(embeddings, event_sizes),
                 torch.split(batch.y, event_sizes),
             ):
-                intra_distance, separation = event_geometry(
-                    event_embeddings, event_labels
-                )
-                stats.intra_distance += intra_distance
-                stats.n_events += 1
+                accumulate_event(stats, event_embeddings, event_labels)
 
-                if separation is not None:
-                    stats.centroid_separation += separation
-                    stats.n_separation_events += 1
+    return stats
+
+
+def accumulate_event(
+    stats: EmbeddingStats,
+    embeddings: Tensor,
+    labels: Tensor,
+) -> None:
+
+    intra_distance, separation = event_geometry(embeddings, labels)
+    stats.intra_distance += intra_distance
+    stats.n_events += 1
+    stats.n_points += int(embeddings.shape[0])
+
+    if separation is not None:
+        stats.centroid_separation += separation
+        stats.n_separation_events += 1
+
+
+def evaluate_basic_transformer_loader(
+    model: TransformerModel,
+    loader: DataLoader,
+    device: torch.device,
+) -> EmbeddingStats:
+
+    stats = EmbeddingStats()
+
+    for event in iter_events(model, loader, device, max_events=None):
+        embeddings = select_embeddings(event, BASIC_EMBEDDING_SOURCE)
+        stats.loss += float(F.cross_entropy(event.logits, event.labels).item())
+        stats.n_batches += 1
+        accumulate_event(stats, embeddings, event.labels)
 
     return stats
 
@@ -163,15 +178,54 @@ def load_model(
     return model
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate a trained GeoTransformer")
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Evaluate a trained model")
     parser.add_argument("checkpoint", type=Path)
+    parser.add_argument("--model", choices=MODEL_CHOICES, default="geo")
     parser.add_argument("--split", choices=("val", "test"), default="test")
     parser.add_argument("--loss", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=2)
-    args = parser.parse_args()
 
+    return parser
+
+
+def report_by_sample(
+    split: str,
+    split_files: list[Path],
+    evaluate_files: Callable[[list[Path]], EmbeddingStats],
+) -> None:
+
+    print_report(f"{split} (all samples)", evaluate_files(split_files))
+
+    for sample_name, sample_files in group_by_sample(split_files).items():
+        print_report(f"{split} / {sample_name}", evaluate_files(sample_files))
+
+
+def main_basic_transformer(args: argparse.Namespace) -> None:
+    train_config = BasicTrainConfig(
+        batch_size=int(args.batch_size),
+        num_workers=int(args.num_workers),
+    )
+    device = select_device()
+    print(
+        f"using device: {device} | basic transformer | "
+        f"embedding: {BASIC_EMBEDDING_SOURCE} (L2-normalised) | loss: crossentropy"
+    )
+
+    model = load_basic_transformer(Path(args.checkpoint), device)
+    pin_memory = device.type == "cuda"
+    split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[args.split]
+
+    def evaluate_files(file_paths: list[Path]) -> EmbeddingStats:
+        loader = build_basic_loader(file_paths, train_config, pin_memory)
+
+        return evaluate_basic_transformer_loader(model, loader, device)
+
+    report_by_sample(str(args.split), split_files, evaluate_files)
+
+
+def main_geo_transformer(args: argparse.Namespace) -> None:
     checkpoint = Path(args.checkpoint)
     run_config = load_run_config(checkpoint)
     model_config = ModelConfig(**run_config.get("model", {}))
@@ -194,18 +248,21 @@ def main() -> None:
     pin_memory = device.type == "cuda"
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[args.split]
 
-    overall_loader = build_loader(split_files, train_config, pin_memory)
-    print_report(
-        f"{args.split} (all samples)",
-        evaluate_loader(model, overall_loader, loss_fn, device),
-    )
+    def evaluate_files(file_paths: list[Path]) -> EmbeddingStats:
+        loader = build_loader(file_paths, train_config, pin_memory)
 
-    for sample_name, sample_files in group_by_sample(split_files).items():
-        sample_loader = build_loader(sample_files, train_config, pin_memory)
-        print_report(
-            f"{args.split} / {sample_name}",
-            evaluate_loader(model, sample_loader, loss_fn, device),
-        )
+        return evaluate_loader(model, loader, loss_fn, device)
+
+    report_by_sample(str(args.split), split_files, evaluate_files)
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
+
+    if args.model == "transformer":
+        main_basic_transformer(args)
+    else:
+        main_geo_transformer(args)
 
 
 if __name__ == "__main__":

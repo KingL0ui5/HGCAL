@@ -32,4 +32,4 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${LOSS_NAME}_${PBS_JOBID}.out"
+.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" 2>&1 | tee "evals/data/eval_${LOSS_NAME}_${PBS_JOBID}.out"
