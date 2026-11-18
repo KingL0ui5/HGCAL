@@ -22,8 +22,8 @@ GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
 
 EVALS=(
     "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_12112026.pt"
-    "$TRANSFORMER_MODULE trained_models/transformer_infonce_20261118_192333_best.pt"
-    "$TRANSFORMER_MODULE trained_models/transformer_discriminative_20261118_192450_best.pt"
+    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_infonce_20261118_192333_best.pt"
+    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_discriminative_20261118_192450_best.pt"
     "$GEO_MODULE trained_models/geo_transformer/geo_infonce_20261112_070054_best.pt"
     "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
 )

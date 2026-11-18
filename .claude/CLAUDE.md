@@ -20,6 +20,7 @@ The HPC host is `ll3023@login.cx3.hpc.imperial.ac.uk`, project dir `~/HGCAL`
   the matching experiment folder under `evals/data/`: files named `transformer_*` or
   `eval_transformer_*` / `eval_crossentropy_*` go to `basic_transformer_runs/`; files named
   `geo_transformer_*` or `eval_geo_*` go to `geo_transformer_runs/`.
-- Model checkpoints and configs (`*_best.pt`, `*_last.pt`, `*_config.json`) go directly in
-  `trained_models/`.
+- Model checkpoints and configs (`*_best.pt`, `*_last.pt`, `*_config.json`) go in the matching
+  experiment folder: `trained_models/basic_transformer/` for `transformer_*` and
+  `trained_models/geo_transformer/` for `geo_*`. Training writes them there by default.
 - Only pull what is new: `rsync -avz --ignore-existing` against the destination folder.
