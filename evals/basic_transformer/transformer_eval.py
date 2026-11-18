@@ -1,7 +1,6 @@
 import argparse
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
@@ -55,28 +54,6 @@ class EventOutputs(NamedTuple):
     logits: Tensor
     labels: Tensor
     energy: Tensor
-
-
-@dataclass
-class ClassificationStats:
-    n_correct: int = 0
-    n_points: int = 0
-    slot_counts: Tensor = field(
-        default_factory=lambda: torch.zeros(ModelConfig().num_classes, dtype=torch.long)
-    )
-
-    def add(self, logits: Tensor, labels: Tensor) -> None:
-        self.n_correct += int((logits.argmax(dim=1) == labels).sum().item())
-        self.n_points += int(labels.numel())
-        self.slot_counts += torch.bincount(labels, minlength=ModelConfig().num_classes)
-
-    @property
-    def accuracy(self) -> float:
-        return self.n_correct / max(self.n_points, 1)
-
-    @property
-    def majority_baseline(self) -> float:
-        return int(self.slot_counts.max().item()) / max(self.n_points, 1)
 
 
 def checkpoint_loss_name(checkpoint: Path) -> str:
@@ -146,14 +123,6 @@ def select_embeddings(event: EventOutputs, source: str) -> Tensor:
     return F.normalize(raw, dim=1)
 
 
-def print_classification_report(stats: ClassificationStats) -> None:
-    print(f"\n== {SPLIT}: slot classification ==")
-    print(f"points:               {stats.n_points}")
-    print(f"accuracy:             {stats.accuracy:.4f}")
-    print(f"majority-slot rate:   {stats.majority_baseline:.4f}")
-    print(f"slot counts:          {stats.slot_counts.tolist()}")
-
-
 def evaluate(
     device: torch.device,
     checkpoint: Path,
@@ -171,9 +140,6 @@ def evaluate(
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[SPLIT]
     loader = build_loader(split_files, train_config, device.type == "cuda")
 
-    has_trained_classifier = loss_name == DEFAULT_LOSS_NAME
-    classification = ClassificationStats()
-    classification_by_multiplicity: dict[int, ClassificationStats] = {}
     stratified = StratifiedReconstruction()
     counts = ReconstructionCounts()
     n_events = 0
@@ -187,29 +153,15 @@ def evaluate(
             event.energy,
         )
         intra_distance, separation = event_geometry(embeddings, event.labels)
-        classification.add(event.logits, event.labels)
-        classification_by_multiplicity.setdefault(
-            multiplicity, ClassificationStats()
-        ).add(event.logits, event.labels)
         counts.add(event_reconstruction)
         n_events += 1
         stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
     print(f"events: {n_events} | embedding source: {source} (L2-normalised)")
-
-    if has_trained_classifier:
-        print_classification_report(classification)
-
     print_reconstruction_report(SPLIT, counts)
     print_geometry_report(SPLIT, stratified)
 
     stratified_metrics = stratified.metrics()
-
-    if has_trained_classifier:
-        stratified_metrics["slot accuracy"] = {
-            key: classification_by_multiplicity[key].accuracy
-            for key in sorted(classification_by_multiplicity)
-        }
 
     print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
     plot_by_multiplicity(

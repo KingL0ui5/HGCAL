@@ -16,7 +16,7 @@ from evals.reco_metrics import ReconstructionCounts
 
 LINE_COLOR = "#2a6fdb"
 IDEAL_VALUES = {"multiplicity ratio": 1.0}
-UNIT_INTERVAL_METRICS = {"efficiency", "purity", "slot accuracy"}
+UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
 
 
