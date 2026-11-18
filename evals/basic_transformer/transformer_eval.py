@@ -28,14 +28,20 @@ from evals.stratified import (
     save_metrics,
 )
 from models.transformer import ModelConfig, TransformerModel
-from train.train import TrainConfig, batch_to_device, build_loader, select_device
+from train.basic_transformer.train import (
+    TrainConfig,
+    batch_to_device,
+    build_loader,
+    select_device,
+)
 
 MODEL_PATH = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "trained_models"
+    / "basic_transformer"
     / "model_20261108_184730.pt"
 )
-EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
+EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "basic_transformer_runs"
 DEFAULT_LOSS_NAME = "crossentropy"
 CHECKPOINT_LOSS_PATTERN = re.compile(r"^transformer_(?P<loss>[a-z]+)_\d{8}_\d{6}")
 SPLIT = "test"

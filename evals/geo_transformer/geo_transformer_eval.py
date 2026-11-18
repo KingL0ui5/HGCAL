@@ -32,20 +32,21 @@ from evals.stratified import (
     save_metrics,
 )
 from losses import build_loss
-from train.geo_train import (
+from train.basic_transformer.train import select_device
+from train.geo_transformer.geo_train import (
     LossConfig,
     ModelConfig,
     TrainConfig,
     build_loader,
 )
-from train.train import select_device
 
 MODEL_PATH = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / "trained_models"
+    / "geo_transformer"
     / "geo_discriminative_20261109_143754_best.pt"
 )
-EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
+EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "geo_transformer_runs"
 SPLIT = "test"
 BATCH_SIZE = 1
 NUM_WORKERS = 2

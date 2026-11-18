@@ -15,7 +15,7 @@ from evals.stratified import (
     y_axis_top,
 )
 
-EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
+EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "geo_transformer_runs"
 INFONCE_COLOR = "#2a6fdb"
 DISCRIMINATIVE_COLOR = "#e0662b"
 

@@ -17,14 +17,14 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-CHECKPOINT="${CHECKPOINT:-trained_models/transformer_12112026.pt}"
+CHECKPOINT="${CHECKPOINT:-trained_models/basic_transformer/transformer_12112026.pt}"
 
 if [ ! -f "$CHECKPOINT" ]; then
     echo "checkpoint not found: $CHECKPOINT (submit with: qsub -v CHECKPOINT=<path>,EVAL_MODULE=<module> eval_job.pbs)" >&2
     exit 1
 fi
 
-EVAL_MODULE="${EVAL_MODULE:-evals.transformer_eval}"
+EVAL_MODULE="${EVAL_MODULE:-evals.basic_transformer.transformer_eval}"
 RUN_NAME="$(basename "$CHECKPOINT" .pt)"
 
 mkdir -p evals/data

@@ -12,16 +12,21 @@ from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
-from evals.embedding_geometry import event_geometry
-from evals.transformer_eval import (
+from evals.basic_transformer.transformer_eval import (
     iter_events,
     select_embeddings,
 )
-from evals.transformer_eval import load_model as load_basic_transformer
+from evals.basic_transformer.transformer_eval import (
+    load_model as load_basic_transformer,
+)
+from evals.embedding_geometry import event_geometry
 from losses import build_loss
 from models.geo_transformer import GeoTransformer
 from models.transformer import TransformerModel
-from train.geo_train import (
+from train.basic_transformer.train import TrainConfig as BasicTrainConfig
+from train.basic_transformer.train import build_loader as build_basic_loader
+from train.basic_transformer.train import select_device
+from train.geo_transformer.geo_train import (
     FEATURE_NAMES,
     GEOMETRIC_FEATURE_INDICES,
     LossConfig,
@@ -29,9 +34,6 @@ from train.geo_train import (
     TrainConfig,
     build_loader,
 )
-from train.train import TrainConfig as BasicTrainConfig
-from train.train import build_loader as build_basic_loader
-from train.train import select_device
 
 MODEL_CHOICES = ("geo", "transformer")
 BASIC_EMBEDDING_SOURCE = "hidden"

@@ -12,7 +12,12 @@ from torch.utils.data import DataLoader
 from data import IGNORE_LABEL
 from losses import build_loss
 from models.transformer import ModelConfig, TransformerModel
-from train.train import TrainConfig, batch_to_device, build_loaders, select_device
+from train.basic_transformer.train import (
+    TrainConfig,
+    batch_to_device,
+    build_loaders,
+    select_device,
+)
 
 ENERGY_FEATURE_INDEX = 3
 LOSS_CHOICES = ("infonce", "discriminative")
@@ -163,7 +168,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--lr", type=float, default=defaults.learning_rate)
     parser.add_argument("--num-workers", type=int, default=defaults.num_workers)
-    parser.add_argument("--output-dir", type=Path, default=Path("trained_models"))
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("trained_models/basic_transformer")
+    )
 
     return parser.parse_args()
 
