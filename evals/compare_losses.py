@@ -34,7 +34,11 @@ def plot_loss_comparison(
         "infonce": (load_metrics(infonce_path), INFONCE_COLOR),
         "discriminative": (load_metrics(discriminative_path), DISCRIMINATIVE_COLOR),
     }
-    names = list(next(iter(series.values()))[0][0])
+    names = [
+        name
+        for name in series["infonce"][0][0]
+        if name in series["discriminative"][0][0]
+    ]
     keys = sorted({key for (_, n_events), _ in series.values() for key in n_events})
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
     figure, axes = plt.subplots(

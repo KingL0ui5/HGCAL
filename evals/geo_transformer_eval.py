@@ -13,6 +13,7 @@ from evals.evaluate import (
     checkpoint_loss_name,
     evaluate_loader,
     load_model,
+    load_run_config,
     print_report,
 )
 from evals.reco_metrics import (
@@ -92,10 +93,19 @@ def evaluate(
     clustering_parameters: ClusteringParameters,
 ) -> None:
 
-    train_config = TrainConfig(batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
-    loss_config = LossConfig()
+    run_config = load_run_config(checkpoint)
+    train_config = TrainConfig(
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS,
+        seed=int(run_config.get("train", {}).get("seed", TrainConfig().seed)),
+    )
+    saved_loss = run_config.get("loss", {})
+    loss_config = LossConfig(
+        name=checkpoint_loss_name(checkpoint),
+        kwargs=dict(saved_loss.get("kwargs", {})),
+    )
 
-    model = load_model(checkpoint, ModelConfig(), device)
+    model = load_model(checkpoint, ModelConfig(**run_config.get("model", {})), device)
     loss_fn = build_loss(loss_config.name, **loss_config.kwargs).to(device)
 
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[SPLIT]

@@ -20,11 +20,12 @@ fi
 CHECKPOINT="${CHECKPOINT:-trained_models/transformer_12112026.pt}"
 
 if [ ! -f "$CHECKPOINT" ]; then
-    echo "checkpoint not found: $CHECKPOINT (submit with: qsub -v CHECKPOINT=<path> eval_job.pbs)" >&2
+    echo "checkpoint not found: $CHECKPOINT (submit with: qsub -v CHECKPOINT=<path>,EVAL_MODULE=<module> eval_job.pbs)" >&2
     exit 1
 fi
 
-LOSS_NAME="crossentropy"
+EVAL_MODULE="${EVAL_MODULE:-evals.transformer_eval}"
+RUN_NAME="$(basename "$CHECKPOINT" .pt)"
 
 mkdir -p evals/data
 
@@ -32,4 +33,4 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.transformer_eval --checkpoint "$CHECKPOINT" 2>&1 | tee "evals/data/eval_${LOSS_NAME}_${PBS_JOBID}.out"
+.venv/bin/python -m "$EVAL_MODULE" --checkpoint "$CHECKPOINT" 2>&1 | tee "evals/data/eval_${RUN_NAME}_${PBS_JOBID}.out"

@@ -139,7 +139,8 @@ def y_axis_top(name: str, values: list[float]) -> float:
     if name in UNIT_INTERVAL_METRICS:
         return 1.05
 
-    peak = max(float(np.nanmax(values)), IDEAL_VALUES.get(name, 0.0))
+    finite_values = [value for value in values if math.isfinite(value)]
+    peak = max([*finite_values, IDEAL_VALUES.get(name, 0.0), 1e-6])
 
     return peak * 1.15
 

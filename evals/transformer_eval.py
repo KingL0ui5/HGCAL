@@ -1,4 +1,5 @@
 import argparse
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +36,8 @@ MODEL_PATH = (
     / "model_20261108_184730.pt"
 )
 EVAL_DATA_DIR = Path(__file__).resolve().parent / "data"
-LOSS_NAME = "crossentropy"
+DEFAULT_LOSS_NAME = "crossentropy"
+CHECKPOINT_LOSS_PATTERN = re.compile(r"^transformer_(?P<loss>[a-z]+)_\d{8}_\d{6}")
 SPLIT = "test"
 BATCH_SIZE = 8
 ENERGY_FEATURE_INDEX = 3
@@ -71,8 +73,14 @@ class ClassificationStats:
         return int(self.slot_counts.max().item()) / max(self.n_points, 1)
 
 
-def output_path(source: str, kind: str, suffix: str = "png") -> Path:
-    return EVAL_DATA_DIR / f"transformer_{LOSS_NAME}_{source}_{kind}.{suffix}"
+def checkpoint_loss_name(checkpoint: Path) -> str:
+    match = CHECKPOINT_LOSS_PATTERN.match(checkpoint.stem)
+
+    return match.group("loss") if match else DEFAULT_LOSS_NAME
+
+
+def output_path(loss_name: str, source: str, kind: str, suffix: str = "png") -> Path:
+    return EVAL_DATA_DIR / f"transformer_{loss_name}_{source}_{kind}.{suffix}"
 
 
 def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
@@ -143,6 +151,7 @@ def print_classification_report(stats: ClassificationStats) -> None:
 def evaluate(
     device: torch.device,
     checkpoint: Path,
+    loss_name: str,
     source: str,
     stratified_path: Path,
     metrics_path: Path,
@@ -156,6 +165,7 @@ def evaluate(
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[SPLIT]
     loader = build_loader(split_files, train_config, device.type == "cuda")
 
+    has_trained_classifier = loss_name == DEFAULT_LOSS_NAME
     classification = ClassificationStats()
     classification_by_multiplicity: dict[int, ClassificationStats] = {}
     stratified = StratifiedReconstruction()
@@ -180,20 +190,26 @@ def evaluate(
         stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
     print(f"events: {n_events} | embedding source: {source} (L2-normalised)")
-    print_classification_report(classification)
+
+    if has_trained_classifier:
+        print_classification_report(classification)
+
     print_reconstruction_report(SPLIT, counts)
     print_geometry_report(SPLIT, stratified)
 
     stratified_metrics = stratified.metrics()
-    stratified_metrics["slot accuracy"] = {
-        key: classification_by_multiplicity[key].accuracy
-        for key in sorted(classification_by_multiplicity)
-    }
+
+    if has_trained_classifier:
+        stratified_metrics["slot accuracy"] = {
+            key: classification_by_multiplicity[key].accuracy
+            for key in sorted(classification_by_multiplicity)
+        }
+
     print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
-        f"Transformer {source} ({SPLIT})",
+        f"Transformer {loss_name} {source} ({SPLIT})",
         stratified_path,
     )
     print(f"stratified plot saved to {stratified_path}")
@@ -227,19 +243,22 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     source = str(args.embedding)
+    checkpoint = Path(args.checkpoint)
+    loss_name = checkpoint_loss_name(checkpoint)
     stratified_output = (
         Path(args.stratified_output)
         if args.stratified_output
-        else output_path(source, "by_multiplicity")
+        else output_path(loss_name, source, "by_multiplicity")
     )
     metrics_output = (
         Path(args.metrics_output)
         if args.metrics_output
-        else output_path(source, "metrics", "json")
+        else output_path(loss_name, source, "metrics", "json")
     )
     evaluate(
         torch.device(str(args.device)),
-        Path(args.checkpoint),
+        checkpoint,
+        loss_name,
         source,
         stratified_output,
         metrics_output,

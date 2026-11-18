@@ -19,4 +19,7 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m train.geo_train --output-dir trained_models
+TRAIN_MODULE="${TRAIN_MODULE:-train.geo_train}"
+LOSS="${LOSS:-infonce}"
+
+.venv/bin/python -m "$TRAIN_MODULE" --loss "$LOSS" --output-dir trained_models
