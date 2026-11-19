@@ -9,6 +9,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 from torch import Tensor
 
@@ -77,7 +78,7 @@ class StratifiedReconstruction:
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
-            "intra-cluster distance": {
+            "average cluster spread": {
                 k: mean_or_nan(self.bins[k].intra_distances) for k in keys
             },
             "centroid separation": {
@@ -88,7 +89,7 @@ class StratifiedReconstruction:
 
 def print_geometry_report(name: str, stratified: StratifiedReconstruction) -> None:
     print(f"\n== {name}: embedding geometry ==")
-    print(f"mean intra-cluster dist:  {stratified.mean_intra_distance:.4f}")
+    print(f"mean cluster spread:      {stratified.mean_intra_distance:.4f}")
     print(f"mean centroid separation: {stratified.mean_centroid_separation:.4f}")
 
 
@@ -154,6 +155,7 @@ def plot_by_multiplicity(
 
     names = list(metrics)
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
+    sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
         n_rows,
         PANEL_COLUMNS,
@@ -164,16 +166,23 @@ def plot_by_multiplicity(
 
     for axis, name in zip(axes.flat, names):
         values = [metrics[name].get(k, math.nan) for k in keys]
-        axis.plot(keys, values, color=LINE_COLOR, linewidth=2, marker="o", markersize=8)
+        sns.lineplot(
+            x=keys,
+            y=values,
+            ax=axis,
+            color=LINE_COLOR,
+            linewidth=2,
+            marker="o",
+            markersize=8,
+        )
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
-        axis.set_xlabel("particles per event")
+        axis.set_xlabel("pileup")
         axis.set_title(name)
-        axis.grid(axis="y", alpha=0.25)
-        axis.spines[["top", "right"]].set_visible(False)
+        sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, values))
 
     for axis in axes.flat[len(names) :]:

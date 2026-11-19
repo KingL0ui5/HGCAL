@@ -127,7 +127,7 @@ def print_report(name: str, stats: EmbeddingStats) -> None:
     print(f"points:                   {stats.n_points}")
     print(f"loss:                     {stats.loss / max(stats.n_batches, 1):.4f}")
     print(
-        f"mean intra-cluster dist:  {stats.intra_distance / max(stats.n_events, 1):.4f}"
+        f"mean cluster spread:      {stats.intra_distance / max(stats.n_events, 1):.4f}"
     )
     print(
         f"mean centroid separation: "

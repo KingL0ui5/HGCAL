@@ -167,7 +167,7 @@ def evaluate(
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
-        f"Transformer {loss_name} {source} ({SPLIT})",
+        f"Transformer {loss_name} {source}",
         stratified_path,
     )
     print(f"stratified plot saved to {stratified_path}")

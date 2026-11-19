@@ -135,7 +135,7 @@ def evaluate(
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
-        f"GeoTransformer ({SPLIT})",
+        "GeoTransformer",
         stratified_path,
     )
     print(f"stratified plot saved to {stratified_path}")

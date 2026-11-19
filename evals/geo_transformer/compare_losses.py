@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from evals.stratified import (
     IDEAL_VALUES,
@@ -41,6 +42,7 @@ def plot_loss_comparison(
     ]
     keys = sorted({key for (_, n_events), _ in series.values() for key in n_events})
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
+    sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
         n_rows,
         PANEL_COLUMNS,
@@ -54,24 +56,25 @@ def plot_loss_comparison(
         for label, ((metrics, _), color) in series.items():
             values = [metrics[name].get(key, math.nan) for key in keys]
             all_values.extend(values)
-            axis.plot(
-                keys,
-                values,
+            sns.lineplot(
+                x=keys,
+                y=values,
+                ax=axis,
                 color=color,
                 linewidth=2,
                 marker="o",
                 markersize=8,
                 label=label,
+                legend=False,
             )
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
-        axis.set_xlabel("particles per event")
+        axis.set_xlabel("pileup")
         axis.set_title(name)
-        axis.grid(axis="y", alpha=0.25)
-        axis.spines[["top", "right"]].set_visible(False)
+        sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, all_values))
 
     axes.flat[0].legend(loc="best")
@@ -79,7 +82,7 @@ def plot_loss_comparison(
     for axis in axes.flat[len(names) :]:
         axis.set_visible(False)
 
-    figure.suptitle("GeoTransformer: infonce vs discriminative loss (test)")
+    figure.suptitle("GeoTransformer: infonce vs discriminative loss")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
