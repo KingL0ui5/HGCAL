@@ -17,7 +17,6 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-TRANSFORMER_MODULE="evals.basic_transformer.transformer_eval"
 GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
 SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 
@@ -28,9 +27,6 @@ latest_spatial_checkpoint() {
 }
 
 EXISTING_EVALS=(
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_12112026.pt"
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_infonce_20261118_192333_best.pt"
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_discriminative_20261118_192450_best.pt"
     "$GEO_MODULE trained_models/geo_transformer/geo_infonce_20261112_070054_best.pt"
     "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
 )
@@ -47,7 +43,7 @@ case "$EVAL_SET" in
     *) echo "unknown EVAL_SET: $EVAL_SET (use all, spatial or existing)" >&2; exit 1 ;;
 esac
 
-mkdir -p evals/data/basic_transformer_runs evals/data/geo_transformer_runs evals/data/spatial_transformer_runs
+mkdir -p evals/data/geo_transformer_runs evals/data/spatial_transformer_runs
 
 uv sync --frozen
 
@@ -65,7 +61,6 @@ for entry in "${EVALS[@]}"; do
     fi
 
     case "$module" in
-        "$TRANSFORMER_MODULE") runs_dir="evals/data/basic_transformer_runs" ;;
         "$SPATIAL_MODULE") runs_dir="evals/data/spatial_transformer_runs" ;;
         *) runs_dir="evals/data/geo_transformer_runs" ;;
     esac

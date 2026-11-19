@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from data import IGNORE_LABEL
 from losses import build_loss
 from models.spatial_transformer import SpatialConfig, SpatialTransformer
-from train.basic_transformer.train import (
+from train.train_utils import (
     TrainConfig,
     batch_to_device,
     build_loaders,

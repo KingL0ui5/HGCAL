@@ -23,7 +23,7 @@ from data import (
 )
 from losses import build_loss
 from models.geo_transformer import GeoTransformer
-from train.basic_transformer.train import select_device
+from train.train_utils import select_device
 
 FEATURE_NAMES = ["x", "y", "z", "energy", "eta", "sin_phi", "cos_phi"]
 GEOMETRIC_FEATURE_INDICES = [0, 1, 2, 4, 5, 6]

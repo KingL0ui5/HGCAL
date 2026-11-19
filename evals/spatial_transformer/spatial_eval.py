@@ -28,7 +28,7 @@ from evals.stratified import (
     save_metrics,
 )
 from models.spatial_transformer import SpatialConfig, SpatialTransformer
-from train.basic_transformer.train import (
+from train.train_utils import (
     TrainConfig,
     batch_to_device,
     build_loader,
