@@ -19,8 +19,15 @@ fi
 
 TRANSFORMER_MODULE="evals.basic_transformer.transformer_eval"
 GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
+SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 
-EVALS=(
+EVAL_SET="${EVAL_SET:-all}"
+
+latest_spatial_checkpoint() {
+    ls -t trained_models/spatial_transformer/spatial_"$1"_*_best.pt 2>/dev/null | head -n 1 || true
+}
+
+EXISTING_EVALS=(
     "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_12112026.pt"
     "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_infonce_20261118_192333_best.pt"
     "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_discriminative_20261118_192450_best.pt"
@@ -28,7 +35,19 @@ EVALS=(
     "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
 )
 
-mkdir -p evals/data/basic_transformer_runs evals/data/geo_transformer_runs
+SPATIAL_EVALS=(
+    "$SPATIAL_MODULE $(latest_spatial_checkpoint infonce)"
+    "$SPATIAL_MODULE $(latest_spatial_checkpoint discriminative)"
+)
+
+case "$EVAL_SET" in
+    all) EVALS=("${EXISTING_EVALS[@]}" "${SPATIAL_EVALS[@]}") ;;
+    spatial) EVALS=("${SPATIAL_EVALS[@]}") ;;
+    existing) EVALS=("${EXISTING_EVALS[@]}") ;;
+    *) echo "unknown EVAL_SET: $EVAL_SET (use all, spatial or existing)" >&2; exit 1 ;;
+esac
+
+mkdir -p evals/data/basic_transformer_runs evals/data/geo_transformer_runs evals/data/spatial_transformer_runs
 
 uv sync --frozen
 
@@ -39,7 +58,7 @@ failed=0
 for entry in "${EVALS[@]}"; do
     read -r module checkpoint <<< "$entry"
 
-    if [ ! -f "$checkpoint" ]; then
+    if [ -z "$checkpoint" ] || [ ! -f "$checkpoint" ]; then
         echo "checkpoint not found: $checkpoint" >&2
         failed=$((failed + 1))
         continue
@@ -47,6 +66,7 @@ for entry in "${EVALS[@]}"; do
 
     case "$module" in
         "$TRANSFORMER_MODULE") runs_dir="evals/data/basic_transformer_runs" ;;
+        "$SPATIAL_MODULE") runs_dir="evals/data/spatial_transformer_runs" ;;
         *) runs_dir="evals/data/geo_transformer_runs" ;;
     esac
 
