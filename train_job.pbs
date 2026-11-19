@@ -23,7 +23,7 @@ TRAIN_MODULE="${TRAIN_MODULE:-train.geo_transformer.geo_train}"
 LOSS="${LOSS:-infonce}"
 
 case "$TRAIN_MODULE" in
-    train.basic_transformer.*) OUTPUT_DIR="trained_models/basic_transformer" ;;
+    train.spatial_transformer.*) OUTPUT_DIR="trained_models/spatial_transformer" ;;
     *) OUTPUT_DIR="trained_models/geo_transformer" ;;
 esac
 

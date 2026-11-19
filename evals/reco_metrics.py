@@ -7,7 +7,7 @@ from torch import Tensor
 from clustering.agglomerative import run_agglomerative
 
 MATCH_ENERGY_FRACTION = 0.7
-PURE_SCORE_THRESHOLD = 0.2
+PURE_FRACTION_THRESHOLD = 0.8
 NOISE_LABEL = -1
 
 
@@ -94,12 +94,9 @@ def event_counts(
     shared_energy = torch.zeros(n_reco, n_sim, dtype=torch.float64).index_put_(
         (reco_index, clustered_sim), clustered_energy, accumulate=True
     )
-    shared_squared = torch.zeros(n_reco, n_sim, dtype=torch.float64).index_put_(
-        (reco_index, clustered_sim), clustered_energy.square(), accumulate=True
-    )
 
     best_fraction = shared_energy.max(dim=0).values / sim_energy.clamp_min(1e-12)
-    reco_to_sim_score = 1.0 - shared_squared.max(dim=1).values / shared_squared.sum(
+    dominant_fraction = shared_energy.max(dim=1).values / shared_energy.sum(
         dim=1
     ).clamp_min(1e-12)
 
@@ -107,7 +104,7 @@ def event_counts(
         n_sim=n_sim,
         n_matched=int((best_fraction >= MATCH_ENERGY_FRACTION).sum().item()),
         n_reco=n_reco,
-        n_pure=int((reco_to_sim_score < PURE_SCORE_THRESHOLD).sum().item()),
+        n_pure=int((dominant_fraction > PURE_FRACTION_THRESHOLD).sum().item()),
     )
 
 

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from data import DATA_PATH, IGNORE_LABEL, get_splits_by_file
 from evals.embedding_geometry import event_geometry
+from evals.evaluate import load_run_config
 from evals.reco_metrics import (
     ClusteringParameters,
     ReconstructionCounts,
@@ -26,32 +27,25 @@ from evals.stratified import (
     print_stratified_table,
     save_metrics,
 )
-from models.transformer import ModelConfig, TransformerModel
-from train.basic_transformer.train import (
+from models.spatial_transformer import SpatialConfig, SpatialTransformer
+from train.train_utils import (
     TrainConfig,
     batch_to_device,
     build_loader,
     select_device,
 )
 
-MODEL_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "trained_models"
-    / "basic_transformer"
-    / "model_20261108_184730.pt"
+EVAL_DATA_DIR = (
+    Path(__file__).resolve().parents[1] / "data" / "spatial_transformer_runs"
 )
-EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "basic_transformer_runs"
-DEFAULT_LOSS_NAME = "crossentropy"
-CHECKPOINT_LOSS_PATTERN = re.compile(r"^transformer_(?P<loss>[a-z]+)_\d{8}_\d{6}")
+CHECKPOINT_LOSS_PATTERN = re.compile(r"^spatial_(?P<loss>[a-z]+)_\d{8}_\d{6}")
 SPLIT = "test"
 BATCH_SIZE = 8
 ENERGY_FEATURE_INDEX = 3
-EMBEDDING_SOURCES = ("hidden", "logits")
 
 
 class EventOutputs(NamedTuple):
-    hidden: Tensor
-    logits: Tensor
+    embeddings: Tensor
     labels: Tensor
     energy: Tensor
 
@@ -59,15 +53,16 @@ class EventOutputs(NamedTuple):
 def checkpoint_loss_name(checkpoint: Path) -> str:
     match = CHECKPOINT_LOSS_PATTERN.match(checkpoint.stem)
 
-    return match.group("loss") if match else DEFAULT_LOSS_NAME
+    return match.group("loss") if match else "unknown"
 
 
-def output_path(loss_name: str, source: str, kind: str, suffix: str = "png") -> Path:
-    return EVAL_DATA_DIR / f"transformer_{loss_name}_{source}_{kind}.{suffix}"
+def output_path(loss_name: str, kind: str, suffix: str = "png") -> Path:
+    return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_{kind}.{suffix}"
 
 
-def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
-    model = TransformerModel(ModelConfig()).to(device)
+def load_model(checkpoint: Path, device: torch.device) -> SpatialTransformer:
+    model_config = SpatialConfig(**load_run_config(checkpoint).get("model", {}))
+    model = SpatialTransformer(model_config).to(device)
     state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
 
@@ -75,7 +70,7 @@ def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
 
 
 def iter_events(
-    model: TransformerModel,
+    model: SpatialTransformer,
     loader: DataLoader,
     device: torch.device,
     max_events: int | None,
@@ -87,17 +82,12 @@ def iter_events(
     with no_grad():
         for cpu_batch in loader:
             batch = batch_to_device(cpu_batch, device)
-            hidden = model.encoder(
-                model.input_projection(batch["features"]),
-                src_key_padding_mask=batch["padding_mask"],
-            )
-            logits = model.classifier(hidden)
+            embeddings = model(batch["features"], batch["padding_mask"])
             energy = torch.expm1(batch["features"][..., ENERGY_FEATURE_INDEX])
             is_valid = (~batch["padding_mask"]) & (batch["labels"] != IGNORE_LABEL)
 
-            hidden, logits, energy, labels, is_valid = (
-                hidden.float().cpu(),
-                logits.float().cpu(),
+            embeddings, energy, labels, is_valid = (
+                embeddings.float().cpu(),
                 energy.float().cpu(),
                 batch["labels"].cpu(),
                 is_valid.cpu(),
@@ -109,25 +99,17 @@ def iter_events(
 
                 keep = is_valid[index]
                 yield EventOutputs(
-                    hidden[index][keep],
-                    logits[index][keep],
+                    F.normalize(embeddings[index][keep], dim=1),
                     labels[index][keep],
                     energy[index][keep],
                 )
                 n_events += 1
 
 
-def select_embeddings(event: EventOutputs, source: str) -> Tensor:
-    raw = event.hidden if source == "hidden" else event.logits
-
-    return F.normalize(raw, dim=1)
-
-
 def evaluate(
     device: torch.device,
     checkpoint: Path,
     loss_name: str,
-    source: str,
     stratified_path: Path,
     metrics_path: Path,
     num_workers: int,
@@ -145,19 +127,18 @@ def evaluate(
     n_events = 0
 
     for event in iter_events(model, loader, device, max_events):
-        embeddings = select_embeddings(event, source)
         multiplicity = event_multiplicity(event.labels)
         event_reconstruction = event_counts(
-            cluster_labels(embeddings, clustering_parameters),
+            cluster_labels(event.embeddings, clustering_parameters),
             event.labels,
             event.energy,
         )
-        intra_distance, separation = event_geometry(embeddings, event.labels)
+        intra_distance, separation = event_geometry(event.embeddings, event.labels)
         counts.add(event_reconstruction)
         n_events += 1
         stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
-    print(f"events: {n_events} | embedding source: {source} (L2-normalised)")
+    print(f"events: {n_events} | latent dimensions: {model.output.out_features}")
     print_reconstruction_report(SPLIT, counts)
     print_geometry_report(SPLIT, stratified)
 
@@ -167,7 +148,7 @@ def evaluate(
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
-        f"Transformer {loss_name} {source}",
+        f"SpatialTransformer {loss_name}",
         stratified_path,
     )
     print(f"stratified plot saved to {stratified_path}")
@@ -176,10 +157,9 @@ def evaluate(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate the raw Transformer")
-    parser.add_argument("--checkpoint", type=Path, default=MODEL_PATH)
+    parser = argparse.ArgumentParser(description="Evaluate the SpatialTransformer")
+    parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--device", default=str(select_device()))
-    parser.add_argument("--embedding", choices=EMBEDDING_SOURCES, default="hidden")
     parser.add_argument("--stratified-output", type=Path, default=None)
     parser.add_argument("--metrics-output", type=Path, default=None)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -200,24 +180,22 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    source = str(args.embedding)
     checkpoint = Path(args.checkpoint)
     loss_name = checkpoint_loss_name(checkpoint)
     stratified_output = (
         Path(args.stratified_output)
         if args.stratified_output
-        else output_path(loss_name, source, "by_multiplicity")
+        else output_path(loss_name, "by_multiplicity")
     )
     metrics_output = (
         Path(args.metrics_output)
         if args.metrics_output
-        else output_path(loss_name, source, "metrics", "json")
+        else output_path(loss_name, "metrics", "json")
     )
     evaluate(
         torch.device(str(args.device)),
         checkpoint,
         loss_name,
-        source,
         stratified_output,
         metrics_output,
         int(args.num_workers),

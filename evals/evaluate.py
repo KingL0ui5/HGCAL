@@ -7,25 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
-from evals.basic_transformer.transformer_eval import (
-    iter_events,
-    select_embeddings,
-)
-from evals.basic_transformer.transformer_eval import (
-    load_model as load_basic_transformer,
-)
 from evals.embedding_geometry import event_geometry
 from losses import build_loss
 from models.geo_transformer import GeoTransformer
-from models.transformer import TransformerModel
-from train.basic_transformer.train import TrainConfig as BasicTrainConfig
-from train.basic_transformer.train import build_loader as build_basic_loader
-from train.basic_transformer.train import select_device
+from train.train_utils import select_device
 from train.geo_transformer.geo_train import (
     FEATURE_NAMES,
     GEOMETRIC_FEATURE_INDICES,
@@ -35,8 +24,6 @@ from train.geo_transformer.geo_train import (
     build_loader,
 )
 
-MODEL_CHOICES = ("geo", "transformer")
-BASIC_EMBEDDING_SOURCE = "hidden"
 CHECKPOINT_LOSS_PATTERN = re.compile(r"^geo_(?P<loss>.+?)_\d{8}_\d{6}")
 
 
@@ -104,23 +91,6 @@ def accumulate_event(
         stats.n_separation_events += 1
 
 
-def evaluate_basic_transformer_loader(
-    model: TransformerModel,
-    loader: DataLoader,
-    device: torch.device,
-) -> EmbeddingStats:
-
-    stats = EmbeddingStats()
-
-    for event in iter_events(model, loader, device, max_events=None):
-        embeddings = select_embeddings(event, BASIC_EMBEDDING_SOURCE)
-        stats.loss += float(F.cross_entropy(event.logits, event.labels).item())
-        stats.n_batches += 1
-        accumulate_event(stats, embeddings, event.labels)
-
-    return stats
-
-
 def print_report(name: str, stats: EmbeddingStats) -> None:
     print(f"\n== {name} ==")
     print(f"events:                   {stats.n_events}")
@@ -183,7 +153,6 @@ def load_model(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate a trained model")
     parser.add_argument("checkpoint", type=Path)
-    parser.add_argument("--model", choices=MODEL_CHOICES, default="geo")
     parser.add_argument("--split", choices=("val", "test"), default="test")
     parser.add_argument("--loss", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -202,29 +171,6 @@ def report_by_sample(
 
     for sample_name, sample_files in group_by_sample(split_files).items():
         print_report(f"{split} / {sample_name}", evaluate_files(sample_files))
-
-
-def main_basic_transformer(args: argparse.Namespace) -> None:
-    train_config = BasicTrainConfig(
-        batch_size=int(args.batch_size),
-        num_workers=int(args.num_workers),
-    )
-    device = select_device()
-    print(
-        f"using device: {device} | basic transformer | "
-        f"embedding: {BASIC_EMBEDDING_SOURCE} (L2-normalised) | loss: crossentropy"
-    )
-
-    model = load_basic_transformer(Path(args.checkpoint), device)
-    pin_memory = device.type == "cuda"
-    split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[args.split]
-
-    def evaluate_files(file_paths: list[Path]) -> EmbeddingStats:
-        loader = build_basic_loader(file_paths, train_config, pin_memory)
-
-        return evaluate_basic_transformer_loader(model, loader, device)
-
-    report_by_sample(str(args.split), split_files, evaluate_files)
 
 
 def main_geo_transformer(args: argparse.Namespace) -> None:
@@ -261,10 +207,7 @@ def main_geo_transformer(args: argparse.Namespace) -> None:
 def main() -> None:
     args = build_arg_parser().parse_args()
 
-    if args.model == "transformer":
-        main_basic_transformer(args)
-    else:
-        main_geo_transformer(args)
+    main_geo_transformer(args)
 
 
 if __name__ == "__main__":

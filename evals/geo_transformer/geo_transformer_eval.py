@@ -32,7 +32,7 @@ from evals.stratified import (
     save_metrics,
 )
 from losses import build_loss
-from train.basic_transformer.train import select_device
+from train.train_utils import select_device
 from train.geo_transformer.geo_train import (
     LossConfig,
     ModelConfig,
