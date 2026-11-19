@@ -146,8 +146,10 @@ class GeoTransformer(nn.Module):
     ):
         super().__init__()
         geom_idx = list(range(in_dim)) if geom_idx is None else list(geom_idx)
+
         if not geom_idx or max(geom_idx) >= in_dim or min(geom_idx) < 0:
             raise ValueError(f"geom_idx {geom_idx} out of range for in_dim {in_dim}")
+
         self.register_buffer(
             "geom_idx", torch.tensor(geom_idx, dtype=torch.long), persistent=False
         )

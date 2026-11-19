@@ -40,8 +40,10 @@ class TransformerModel(nn.Module):
 
         self.classifier = nn.Linear(config.d_model, config.num_classes)
 
-    def forward(self, features: Tensor, padding_mask: Tensor) -> Tensor:  # ty: ignore[invalid-mutable-override]
+    def embed(self, features: Tensor, padding_mask: Tensor) -> Tensor:
         hidden = self.input_projection(features)
-        hidden = self.encoder(hidden, src_key_padding_mask=padding_mask)
 
-        return self.classifier(hidden).transpose(1, 2)
+        return self.encoder(hidden, src_key_padding_mask=padding_mask)
+
+    def forward(self, features: Tensor, padding_mask: Tensor) -> Tensor:  # ty: ignore[invalid-mutable-override]
+        return self.classifier(self.embed(features, padding_mask)).transpose(1, 2)

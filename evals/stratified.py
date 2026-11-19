@@ -1,3 +1,4 @@
+import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,15 +9,15 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
-from sklearn.metrics import roc_auc_score
 from torch import Tensor
 
 from evals.reco_metrics import ReconstructionCounts
 
 LINE_COLOR = "#2a6fdb"
 IDEAL_VALUES = {"multiplicity ratio": 1.0}
-UNIT_INTERVAL_METRICS = {"efficiency", "purity", "pair ROC AUC", "slot accuracy"}
+UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
 
 
@@ -24,25 +25,16 @@ def event_multiplicity(labels: Tensor) -> int:
     return int(torch.unique(labels).numel())
 
 
+def mean_or_nan(values: list[float]) -> float:
+    return float(np.mean(values)) if values else math.nan
+
+
 @dataclass
 class MultiplicityBin:
     counts: ReconstructionCounts = field(default_factory=ReconstructionCounts)
-    pair_scores: list[Tensor] = field(default_factory=list)
-    pair_labels: list[Tensor] = field(default_factory=list)
+    intra_distances: list[float] = field(default_factory=list)
+    separations: list[float] = field(default_factory=list)
     n_events: int = 0
-
-    @property
-    def auc(self) -> float:
-        if not self.pair_scores:
-            return math.nan
-
-        scores = torch.cat(self.pair_scores).numpy().astype(np.float32)
-        labels = torch.cat(self.pair_labels).numpy().astype(np.int8)
-
-        if len(np.unique(labels)) < 2:
-            return math.nan
-
-        return float(roc_auc_score(labels, scores))
 
 
 class StratifiedReconstruction:
@@ -53,36 +45,52 @@ class StratifiedReconstruction:
         self,
         multiplicity: int,
         counts: ReconstructionCounts,
-        pair_scores: Tensor | None = None,
-        pair_labels: Tensor | None = None,
+        intra_distance: float,
+        separation: float | None,
     ) -> None:
 
         stratum = self.bins.setdefault(multiplicity, MultiplicityBin())
         stratum.counts.add(counts)
+        stratum.intra_distances.append(intra_distance)
         stratum.n_events += 1
 
-        if pair_scores is not None and pair_labels is not None:
-            stratum.pair_scores.append(pair_scores)
-            stratum.pair_labels.append(pair_labels)
+        if separation is not None:
+            stratum.separations.append(separation)
 
     @property
     def n_events(self) -> dict[int, int]:
         return {key: self.bins[key].n_events for key in sorted(self.bins)}
 
+    @property
+    def mean_intra_distance(self) -> float:
+        return mean_or_nan([d for b in self.bins.values() for d in b.intra_distances])
+
+    @property
+    def mean_centroid_separation(self) -> float:
+        return mean_or_nan([s for b in self.bins.values() for s in b.separations])
+
     def metrics(self) -> dict[str, dict[int, float]]:
         keys = sorted(self.bins)
-        metrics: dict[str, dict[int, float]] = {
+
+        return {
             "efficiency": {k: self.bins[k].counts.efficiency for k in keys},
             "purity": {k: self.bins[k].counts.purity for k in keys},
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
+            "average cluster spread": {
+                k: mean_or_nan(self.bins[k].intra_distances) for k in keys
+            },
+            "centroid separation": {
+                k: mean_or_nan(self.bins[k].separations) for k in keys
+            },
         }
 
-        if any(self.bins[k].pair_scores for k in keys):
-            metrics["pair ROC AUC"] = {k: self.bins[k].auc for k in keys}
 
-        return metrics
+def print_geometry_report(name: str, stratified: StratifiedReconstruction) -> None:
+    print(f"\n== {name}: embedding geometry ==")
+    print(f"mean cluster spread:      {stratified.mean_intra_distance:.4f}")
+    print(f"mean centroid separation: {stratified.mean_centroid_separation:.4f}")
 
 
 def print_stratified_table(
@@ -102,6 +110,42 @@ def print_stratified_table(
         )
 
 
+def save_metrics(
+    metrics: dict[str, dict[int, float]],
+    n_events: dict[int, int],
+    output_path: Path,
+) -> None:
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps({"metrics": metrics, "n_events": n_events}, indent=2)
+    )
+
+
+def load_metrics(
+    input_path: Path,
+) -> tuple[dict[str, dict[int, float]], dict[int, int]]:
+
+    payload = json.loads(input_path.read_text())
+    metrics = {
+        name: {int(key): float(value) for key, value in values.items()}
+        for name, values in payload["metrics"].items()
+    }
+    n_events = {int(key): int(value) for key, value in payload["n_events"].items()}
+
+    return metrics, n_events
+
+
+def y_axis_top(name: str, values: list[float]) -> float:
+    if name in UNIT_INTERVAL_METRICS:
+        return 1.05
+
+    finite_values = [value for value in values if math.isfinite(value)]
+    peak = max([*finite_values, IDEAL_VALUES.get(name, 0.0), 1e-6])
+
+    return peak * 1.15
+
+
 def plot_by_multiplicity(
     metrics: dict[str, dict[int, float]],
     n_events: dict[int, int],
@@ -111,6 +155,7 @@ def plot_by_multiplicity(
 
     names = list(metrics)
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
+    sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
         n_rows,
         PANEL_COLUMNS,
@@ -121,21 +166,24 @@ def plot_by_multiplicity(
 
     for axis, name in zip(axes.flat, names):
         values = [metrics[name].get(k, math.nan) for k in keys]
-        axis.plot(keys, values, color=LINE_COLOR, linewidth=2, marker="o", markersize=8)
+        sns.lineplot(
+            x=keys,
+            y=values,
+            ax=axis,
+            color=LINE_COLOR,
+            linewidth=2,
+            marker="o",
+            markersize=8,
+        )
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
-        axis.set_xlabel("particles per event")
+        axis.set_xlabel("pileup")
         axis.set_title(name)
-        axis.set_ylim(bottom=0.0)
-        axis.grid(axis="y", alpha=0.25)
-        axis.spines[["top", "right"]].set_visible(False)
-
-        peak = max(float(np.nanmax(values)), IDEAL_VALUES.get(name, 0.0))
-        top = 1.05 if name in UNIT_INTERVAL_METRICS else peak * 1.15
-        axis.set_ylim(0.0, top)
+        sns.despine(ax=axis)
+        axis.set_ylim(0.0, y_axis_top(name, values))
 
     for axis in axes.flat[len(names) :]:
         axis.set_visible(False)

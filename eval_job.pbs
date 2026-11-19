@@ -1,9 +1,9 @@
 #!/bin/bash
-#PBS -N eval_model
+#PBS -N eval_models
 #PBS -o evals/data/logs/
 #PBS -e evals/data/logs/
 #PBS -l select=1:ncpus=4:mem=24gb:ngpus=1:gpu_type=L40S
-#PBS -l walltime=01:00:00
+#PBS -l walltime=04:00:00
 
 set -euo pipefail
 
@@ -17,20 +17,48 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-CHECKPOINT="${CHECKPOINT:-$(ls -t trained_models/geo_infonce_*_best.pt 2>/dev/null | head -n 1 || true)}"
+TRANSFORMER_MODULE="evals.basic_transformer.transformer_eval"
+GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
 
-if [ ! -f "$CHECKPOINT" ]; then
-    echo "no geo_infonce checkpoint found in trained_models/ (train first, or submit with: qsub -v CHECKPOINT=<path> eval_job.pbs)" >&2
-    exit 1
-fi
+EVALS=(
+    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_12112026.pt"
+    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_infonce_20261118_192333_best.pt"
+    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_discriminative_20261118_192450_best.pt"
+    "$GEO_MODULE trained_models/geo_transformer/geo_infonce_20261112_070054_best.pt"
+    "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
+)
 
-LOSS_NAME="$(basename "$CHECKPOINT" | sed -nE 's/^geo_(.+)_[0-9]{8}_[0-9]{6}_(best|last)\.pt$/\1/p')"
-LOSS_NAME="${LOSS_NAME:-unknown}"
-
-mkdir -p evals/data
+mkdir -p evals/data/basic_transformer_runs evals/data/geo_transformer_runs
 
 uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-.venv/bin/python -m evals.geo_transformer_eval --checkpoint "$CHECKPOINT" --roc 2>&1 | tee "evals/data/eval_${LOSS_NAME}_${PBS_JOBID}.out"
+failed=0
+
+for entry in "${EVALS[@]}"; do
+    read -r module checkpoint <<< "$entry"
+
+    if [ ! -f "$checkpoint" ]; then
+        echo "checkpoint not found: $checkpoint" >&2
+        failed=$((failed + 1))
+        continue
+    fi
+
+    case "$module" in
+        "$TRANSFORMER_MODULE") runs_dir="evals/data/basic_transformer_runs" ;;
+        *) runs_dir="evals/data/geo_transformer_runs" ;;
+    esac
+
+    run_name="$(basename "$checkpoint" .pt)"
+    echo "=== evaluating $checkpoint with $module ==="
+
+    if ! .venv/bin/python -m "$module" --checkpoint "$checkpoint" 2>&1 | tee "$runs_dir/eval_${run_name}_${PBS_JOBID}.out"; then
+        echo "eval failed: $checkpoint" >&2
+        failed=$((failed + 1))
+    fi
+done
+
+echo "evals finished, failures: $failed"
+
+exit "$failed"
