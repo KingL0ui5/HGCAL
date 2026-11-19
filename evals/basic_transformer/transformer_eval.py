@@ -26,7 +26,7 @@ from evals.stratified import (
     print_stratified_table,
     save_metrics,
 )
-from models.transformer import ModelConfig, TransformerModel
+from models.classifier_transformer import ClassifierConfig, ClassifierTransformer
 from train.basic_transformer.train import (
     TrainConfig,
     batch_to_device,
@@ -66,8 +66,8 @@ def output_path(loss_name: str, source: str, kind: str, suffix: str = "png") -> 
     return EVAL_DATA_DIR / f"transformer_{loss_name}_{source}_{kind}.{suffix}"
 
 
-def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
-    model = TransformerModel(ModelConfig()).to(device)
+def load_model(checkpoint: Path, device: torch.device) -> ClassifierTransformer:
+    model = ClassifierTransformer(ClassifierConfig()).to(device)
     state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
 
@@ -75,7 +75,7 @@ def load_model(checkpoint: Path, device: torch.device) -> TransformerModel:
 
 
 def iter_events(
-    model: TransformerModel,
+    model: ClassifierTransformer,
     loader: DataLoader,
     device: torch.device,
     max_events: int | None,

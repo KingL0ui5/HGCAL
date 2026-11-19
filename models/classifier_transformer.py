@@ -4,7 +4,7 @@ from torch import Tensor, nn
 
 
 @dataclass
-class ModelConfig:
+class ClassifierConfig:
     num_classes: int = 5
     d_model: int = 128
     n_heads: int = 8
@@ -13,8 +13,8 @@ class ModelConfig:
     dropout: float = 0.1
 
 
-class TransformerModel(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+class ClassifierTransformer(nn.Module):
+    def __init__(self, config: ClassifierConfig) -> None:
         super().__init__()
 
         self.input_projection = nn.Sequential(

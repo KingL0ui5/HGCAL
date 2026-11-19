@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from data import IGNORE_LABEL
 from losses import build_loss
-from models.transformer import ModelConfig, TransformerModel
+from models.spatial_transformer import SpatialConfig, SpatialTransformer
 from train.basic_transformer.train import (
     TrainConfig,
     batch_to_device,
@@ -50,7 +50,7 @@ def flatten_batch(
 
 
 def run_epoch(
-    model: TransformerModel,
+    model: SpatialTransformer,
     loader: DataLoader,
     loss_fn: nn.Module,
     device: torch.device,
@@ -69,7 +69,7 @@ def run_epoch(
     with torch.set_grad_enabled(is_training):
         for cpu_batch in loader:
             batch = batch_to_device(cpu_batch, device)
-            embeddings = model.embed(batch["features"], batch["padding_mask"])
+            embeddings = model(batch["features"], batch["padding_mask"])
             flat_embeddings, flat_batch = flatten_batch(embeddings, batch)
             loss = loss_fn(flat_embeddings, flat_batch)
 
@@ -98,7 +98,7 @@ def run_epoch(
 
 
 def train(
-    model: TransformerModel,
+    model: SpatialTransformer,
     train_loader: DataLoader,
     validation_loader: DataLoader,
     loss_fn: nn.Module,
@@ -161,15 +161,16 @@ def train(
 def parse_args() -> argparse.Namespace:
     defaults = TrainConfig()
     parser = argparse.ArgumentParser(
-        description="Train the basic Transformer with a metric-learning loss"
+        description="Train the SpatialTransformer with a metric-learning loss"
     )
     parser.add_argument("--loss", choices=LOSS_CHOICES, required=True)
     parser.add_argument("--epochs", type=int, default=defaults.n_epochs)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--lr", type=float, default=defaults.learning_rate)
     parser.add_argument("--num-workers", type=int, default=defaults.num_workers)
+    parser.add_argument("--out-dim", type=int, default=SpatialConfig().out_dim)
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("trained_models/basic_transformer")
+        "--output-dir", type=Path, default=Path("trained_models/spatial_transformer")
     )
 
     return parser.parse_args()
@@ -183,7 +184,7 @@ def main() -> None:
         n_epochs=int(args.epochs),
         num_workers=int(args.num_workers),
     )
-    model_config = ModelConfig()
+    model_config = SpatialConfig(out_dim=int(args.out_dim))
     loss_name = str(args.loss)
     output_dir = Path(args.output_dir)
     torch.manual_seed(train_config.seed)
@@ -192,12 +193,12 @@ def main() -> None:
     train_loader, validation_loader = build_loaders(
         train_config, pin_memory=device.type == "cuda"
     )
-    model = TransformerModel(model_config).to(device)
+    model = SpatialTransformer(model_config).to(device)
     loss_fn = build_loss(loss_name).to(device)
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Transformer ({n_parameters:,} params) | loss: {loss_name}")
+    print(f"SpatialTransformer ({n_parameters:,} params) | loss: {loss_name}")
 
-    run_name = f"transformer_{loss_name}_{time.strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"spatial_{loss_name}_{time.strftime('%Y%m%d_%H%M%S')}"
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / f"{run_name}_config.json").write_text(
         json.dumps(

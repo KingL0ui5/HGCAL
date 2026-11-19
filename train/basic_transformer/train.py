@@ -14,7 +14,7 @@ from data import (
     collate_events,
     get_splits_by_file,
 )
-from models.transformer import ModelConfig, TransformerModel
+from models.classifier_transformer import ClassifierConfig, ClassifierTransformer
 
 
 @dataclass
@@ -79,7 +79,7 @@ def build_loaders(
 
 
 def train_epoch(
-    model: TransformerModel,
+    model: ClassifierTransformer,
     loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: optim.Optimizer,
@@ -117,7 +117,7 @@ def train_epoch(
 
 
 def validate(
-    model: TransformerModel,
+    model: ClassifierTransformer,
     loader: DataLoader,
     loss_fn: nn.Module,
     device: torch.device,
@@ -149,7 +149,7 @@ def validate(
 
 
 def train(
-    model: TransformerModel,
+    model: ClassifierTransformer,
     train_loader: DataLoader,
     validation_loader: DataLoader,
     config: TrainConfig,
@@ -209,7 +209,7 @@ def main() -> None:
         train_config, pin_memory=device.type == "cuda"
     )
 
-    model = TransformerModel(ModelConfig()).to(device)
+    model = ClassifierTransformer(ClassifierConfig()).to(device)
     train(model, train_loader, validation_loader, train_config, device)
 
     torch.save(model.state_dict(), "model.pt")

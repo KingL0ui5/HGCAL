@@ -21,8 +21,8 @@ from evals.basic_transformer.transformer_eval import (
 )
 from evals.embedding_geometry import event_geometry
 from losses import build_loss
+from models.classifier_transformer import ClassifierTransformer
 from models.geo_transformer import GeoTransformer
-from models.transformer import TransformerModel
 from train.basic_transformer.train import TrainConfig as BasicTrainConfig
 from train.basic_transformer.train import build_loader as build_basic_loader
 from train.basic_transformer.train import select_device
@@ -105,7 +105,7 @@ def accumulate_event(
 
 
 def evaluate_basic_transformer_loader(
-    model: TransformerModel,
+    model: ClassifierTransformer,
     loader: DataLoader,
     device: torch.device,
 ) -> EmbeddingStats:
