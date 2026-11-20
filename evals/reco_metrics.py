@@ -76,8 +76,10 @@ def event_counts(
 
     energy = energy.to(torch.float64)
     _, sim_index = torch.unique(sim_labels, return_inverse=True)
+
     n_sim = int(sim_index.max().item()) + 1
-    sim_energy = torch.zeros(n_sim, dtype=torch.float64).index_add_(
+
+    sim_energies = torch.zeros(n_sim, dtype=torch.float64).index_add_(
         0, sim_index, energy
     )
 
@@ -91,20 +93,32 @@ def event_counts(
     clustered_sim = sim_index[clustered]
     clustered_energy = energy[clustered]
 
-    shared_energy = torch.zeros(n_reco, n_sim, dtype=torch.float64).index_put_(
-        (reco_index, clustered_sim), clustered_energy, accumulate=True
+    energy_per_reco_per_sim_cluster = torch.zeros(
+        n_reco, n_sim, dtype=torch.float64
+    ).index_put_((reco_index, clustered_sim), clustered_energy, accumulate=True)
+
+    frac_max_sim_energy_in_all_reco = energy_per_reco_per_sim_cluster.max(
+        dim=0
+    ).values / sim_energies.clamp_min(1e-12)
+
+    n_matched = len(
+        frac_max_sim_energy_in_all_reco[
+            frac_max_sim_energy_in_all_reco >= MATCH_ENERGY_FRACTION
+        ]
     )
 
-    best_fraction = shared_energy.max(dim=0).values / sim_energy.clamp_min(1e-12)
-    dominant_fraction = shared_energy.max(dim=1).values / shared_energy.sum(
+    reco_energy = energy_per_reco_per_sim_cluster.sum(dim=1)
+    impurity = 1.0 - energy_per_reco_per_sim_cluster.max(
         dim=1
-    ).clamp_min(1e-12)
+    ).values / reco_energy.clamp_min(1e-12)
+
+    n_pure = len(impurity[impurity < PURE_FRACTION_THRESHOLD])
 
     return ReconstructionCounts(
         n_sim=n_sim,
-        n_matched=int((best_fraction >= MATCH_ENERGY_FRACTION).sum().item()),
+        n_matched=n_matched,
         n_reco=n_reco,
-        n_pure=int((dominant_fraction > PURE_FRACTION_THRESHOLD).sum().item()),
+        n_pure=n_pure,
     )
 
 
