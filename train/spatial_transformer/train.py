@@ -4,6 +4,11 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import torch
 from torch import Tensor, nn, optim
 from torch.utils import tensorboard
@@ -21,6 +26,7 @@ from train.train_utils import (
 
 ENERGY_FEATURE_INDEX = 3
 LOSS_CHOICES = ("infonce", "discriminative")
+TRAINING_OUTPUT_DIR = Path("trained_models/training_output")
 
 
 @dataclass
@@ -60,6 +66,7 @@ def run_epoch(
     global_step: int = 0,
 ) -> tuple[float, int]:
 
+    start_time = time.perf_counter()
     is_training = optimizer is not None
     model.train(is_training)
     total_loss = 0.0
@@ -92,6 +99,10 @@ def run_epoch(
                 if writer is not None:
                     writer.add_scalar("Loss/train", mean_window_loss, global_step)
 
+                    epoch_duration = time.perf_counter() - start_time
+
+                    writer.add_scalar("Time/epoch_seconds", epoch_duration, global_step)
+
                 window_loss = 0.0
 
     return total_loss / max(n_batches, 1), global_step
@@ -113,12 +124,16 @@ def train(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
+
     writer = tensorboard.SummaryWriter(f"runs/{run_name}")
     best_validation_loss = float("inf")
     global_step = 0
 
+    train_losses: list[float] = []
+    validation_losses: list[float] = []
+    training_start = time.perf_counter()
+
     for epoch in range(config.n_epochs):
-        start_time = time.perf_counter()
         print(f"epoch {epoch + 1}/{config.n_epochs}")
 
         train_loss, global_step = run_epoch(
@@ -131,22 +146,21 @@ def train(
             writer=writer,
             global_step=global_step,
         )
+
         validation_loss, _ = run_epoch(
             model, validation_loader, loss_fn, device, config
         )
 
-        seconds = time.perf_counter() - start_time
         is_best = validation_loss < best_validation_loss
-        print(
-            f"  train loss {train_loss:.4f} | val loss {validation_loss:.4f} "
-            f"| {seconds:.0f}s{' *best*' if is_best else ''}"
-        )
+        train_losses.append(train_loss)
+        validation_losses.append(validation_loss)
 
         writer.add_scalars(
             "Loss/epoch",
             {"train": train_loss, "validation": validation_loss},
             epoch + 1,
         )
+
         writer.flush()
 
         if is_best:
@@ -156,6 +170,26 @@ def train(
         torch.save(model.state_dict(), output_dir / f"{run_name}_last.pt")
 
     writer.close()
+    print(f"total training time: {time.perf_counter() - training_start:.0f}s")
+    TRAINING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plot_losses(
+        train_losses, validation_losses, TRAINING_OUTPUT_DIR / f"{run_name}_loss.png"
+    )
+
+
+def plot_losses(
+    train_losses: list[float], validation_losses: list[float], path: Path
+) -> None:
+    epochs = range(1, len(train_losses) + 1)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(epochs, train_losses, marker="o", label="train")
+    ax.plot(epochs, validation_losses, marker="o", label="validation")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("loss")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
 
 
 def parse_args() -> argparse.Namespace:
