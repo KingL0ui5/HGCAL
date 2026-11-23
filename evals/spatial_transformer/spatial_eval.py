@@ -1,6 +1,8 @@
 import argparse
 import re
+import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -17,7 +19,6 @@ from evals.reco_metrics import (
     ReconstructionCounts,
     cluster_labels,
     event_counts,
-    print_reconstruction_report,
 )
 from evals.stratified import (
     StratifiedReconstruction,
@@ -50,6 +51,12 @@ class EventOutputs(NamedTuple):
     energy: Tensor
 
 
+@dataclass
+class Timings:
+    inference: float = 0.0
+    clustering: float = 0.0
+
+
 def checkpoint_loss_name(checkpoint: Path) -> str:
     match = CHECKPOINT_LOSS_PATTERN.match(checkpoint.stem)
 
@@ -74,6 +81,7 @@ def iter_events(
     loader: DataLoader,
     device: torch.device,
     max_events: int | None,
+    timings: Timings,
 ) -> Iterator[EventOutputs]:
 
     model.eval()
@@ -81,6 +89,7 @@ def iter_events(
 
     with no_grad():
         for cpu_batch in loader:
+            start = time.perf_counter()
             batch = batch_to_device(cpu_batch, device)
             embeddings = model(batch["features"], batch["padding_mask"])
             energy = torch.expm1(batch["features"][..., ENERGY_FEATURE_INDEX])
@@ -92,6 +101,7 @@ def iter_events(
                 batch["labels"].cpu(),
                 is_valid.cpu(),
             )
+            timings.inference += time.perf_counter() - start
 
             for index in range(labels.shape[0]):
                 if max_events is not None and n_events >= max_events:
@@ -124,33 +134,42 @@ def evaluate(
 
     stratified = StratifiedReconstruction()
     counts = ReconstructionCounts()
+
+    timings = Timings()
     n_events = 0
 
-    for event in iter_events(model, loader, device, max_events):
+    for event in iter_events(model, loader, device, max_events, timings):
         multiplicity = event_multiplicity(event.labels)
-        event_reconstruction = event_counts(
-            cluster_labels(event.embeddings, clustering_parameters),
-            event.labels,
-            event.energy,
-        )
+        start = time.perf_counter()
+        predicted = cluster_labels(event.embeddings, clustering_parameters)
+        timings.clustering += time.perf_counter() - start
+        event_reconstruction = event_counts(predicted, event.labels, event.energy)
         intra_distance, separation = event_geometry(event.embeddings, event.labels)
         counts.add(event_reconstruction)
         n_events += 1
         stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
     print(f"events: {n_events} | latent dimensions: {model.output.out_features}")
-    print_reconstruction_report(SPLIT, counts)
+    print(
+        f"inference time: {timings.inference:.2f}s "
+        f"({1e3 * timings.inference / max(n_events, 1):.2f} ms/event) | "
+        f"agglomerative clustering time: {timings.clustering:.2f}s "
+        f"({1e3 * timings.clustering / max(n_events, 1):.2f} ms/event)"
+    )
+
     print_geometry_report(SPLIT, stratified)
 
     stratified_metrics = stratified.metrics()
 
     print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
+
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
         f"SpatialTransformer {loss_name}",
         stratified_path,
     )
+
     print(f"stratified plot saved to {stratified_path}")
     save_metrics(stratified_metrics, stratified.n_events, metrics_path)
     print(f"metrics saved to {metrics_path}")
