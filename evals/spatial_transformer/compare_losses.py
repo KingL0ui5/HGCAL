@@ -77,7 +77,7 @@ def plot_loss_comparison(
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
-        axis.set_xlabel("pileup")
+        axis.set_xlabel("multiplicity")
         axis.set_title(name)
         sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, all_values))

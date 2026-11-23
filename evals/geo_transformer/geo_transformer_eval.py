@@ -7,6 +7,7 @@ import torch
 from torch import nn, no_grad
 from torch.utils.data import DataLoader
 
+from data import XYZ_SCALE
 from evals.base_eval import BaseEvaluator
 from evals.eval_utils import (
     EmbeddingStats,
@@ -74,6 +75,7 @@ class GeoTransformerEvaluator(BaseEvaluator[GeoTransformer]):
                 torch.split(embeddings, event_sizes),
                 torch.split(batch.y.cpu(), event_sizes),
                 torch.split(batch.energy.cpu(), event_sizes),
+                torch.split(batch.x[:, :3].cpu() * XYZ_SCALE, event_sizes),
             )
         ]
 

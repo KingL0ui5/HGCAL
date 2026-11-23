@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from data import IGNORE_LABEL
+from data import IGNORE_LABEL, XYZ_SCALE
 from evals.base_eval import BaseEvaluator
 from evals.eval_utils import EventOutputs
 from models.spatial_transformer import SpatialConfig, SpatialTransformer
@@ -42,6 +42,7 @@ class SpatialTransformerEvaluator(BaseEvaluator[SpatialTransformer]):
         batch = batch_to_device(cpu_batch, self.device)
         embeddings = model(batch["features"], batch["padding_mask"]).float().cpu()
         energy = torch.expm1(batch["features"][..., ENERGY_FEATURE_INDEX]).float().cpu()
+        positions = (batch["features"][..., :3] * XYZ_SCALE).float().cpu()
         labels = batch["labels"].cpu()
         is_valid = ((~batch["padding_mask"]) & (batch["labels"] != IGNORE_LABEL)).cpu()
 
@@ -50,6 +51,7 @@ class SpatialTransformerEvaluator(BaseEvaluator[SpatialTransformer]):
                 F.normalize(embeddings[index][keep], dim=1),
                 labels[index][keep],
                 energy[index][keep],
+                positions[index][keep],
             )
             for index, keep in enumerate(is_valid)
         ]

@@ -18,6 +18,7 @@ class EventOutputs(NamedTuple):
     embeddings: Tensor
     labels: Tensor
     energy: Tensor
+    positions: Tensor
 
 
 class Timings(BaseModel):

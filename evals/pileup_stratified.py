@@ -35,6 +35,8 @@ class PileupBin(BaseModel):
     counts: ReconstructionCounts = Field(default_factory=ReconstructionCounts)
     intra_distances: list[Tensor] = Field(default_factory=list)
     separations: list[float] = Field(default_factory=list)
+    input_intra_distances: list[Tensor] = Field(default_factory=list)
+    input_separations: list[float] = Field(default_factory=list)
     n_events: int = 0
 
 
@@ -57,6 +59,19 @@ class PileupStratifiedReco:
 
         if separation is not None:
             bins.separations.append(separation)
+
+    def add_input_geometry(
+        self,
+        multiplicity: int,
+        intra_distances: Tensor,
+        separation: float | None,
+    ) -> None:
+
+        bins = self.bins.setdefault(multiplicity, PileupBin())
+        bins.input_intra_distances.append(intra_distances.abs().mean(dim=0))
+
+        if separation is not None:
+            bins.input_separations.append(separation)
 
     @property
     def n_events(self) -> dict[int, int]:
@@ -83,6 +98,19 @@ class PileupStratifiedReco:
             for dim in range(len(self.mean_intra_distances))
         }
 
+        n_input_dimensions = next(
+            (len(d) for b in self.bins.values() for d in b.input_intra_distances), 0
+        )
+        input_intra_distances_by_dimension = {
+            f"input cluster spread dim {dim}": {
+                k: mean_or_nan(
+                    [float(d[dim]) for d in self.bins[k].input_intra_distances]
+                )
+                for k in keys
+            }
+            for dim in range(n_input_dimensions)
+        }
+
         return {
             "efficiency": {k: self.bins[k].counts.efficiency for k in keys},
             "purity": {k: self.bins[k].counts.purity for k in keys},
@@ -93,6 +121,10 @@ class PileupStratifiedReco:
                 k: mean_or_nan(self.bins[k].separations) for k in keys
             },
             **mean_intra_distances_by_dimension,
+            "input centroid separation": {
+                k: mean_or_nan(self.bins[k].input_separations) for k in keys
+            },
+            **input_intra_distances_by_dimension,
         }
 
 
@@ -168,7 +200,7 @@ def plot_by_multiplicity(
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
-        axis.set_xlabel("pileup")
+        axis.set_xlabel("multiplicity")
         axis.set_title(name)
         sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, values))

@@ -176,6 +176,9 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             intra_distances, separation = geometry_metrics(
                 event.embeddings, event.labels
             )
+            input_intra_distances, input_separation = geometry_metrics(
+                event.positions, event.labels
+            )
 
             counts.add(reconstruction)
             stratified.add(
@@ -183,6 +186,11 @@ class BaseEvaluator(ABC, Generic[ModelT]):
                 reconstruction,
                 intra_distances,
                 separation,
+            )
+            stratified.add_input_geometry(
+                event_multiplicity(event.labels),
+                input_intra_distances,
+                input_separation,
             )
 
             latent_dimensions = int(event.embeddings.shape[1])
