@@ -2,31 +2,29 @@ import argparse
 import re
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
 import torch
 import torch.nn.functional as F
+from pydantic import BaseModel
 from torch import Tensor, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, IGNORE_LABEL, get_splits_by_file
-from evals.embedding_geometry import event_geometry
-from evals.evaluate import load_run_config
+from evals.eval_utils import checkpoint_loss_name, load_run_config, load_weights
+from evals.geometry_metrics import geometry_metrics
+from evals.pileup_stratified import (
+    PileupStratifiedReco,
+    event_multiplicity,
+    plot_by_multiplicity,
+    save_metrics,
+)
 from evals.reco_metrics import (
     ClusteringParameters,
     ReconstructionCounts,
     cluster_labels,
     event_counts,
-)
-from evals.stratified import (
-    StratifiedReconstruction,
-    event_multiplicity,
-    plot_by_multiplicity,
-    print_geometry_report,
-    print_stratified_table,
-    save_metrics,
 )
 from models.spatial_transformer import SpatialConfig, SpatialTransformer
 from train.train_utils import (
@@ -51,29 +49,13 @@ class EventOutputs(NamedTuple):
     energy: Tensor
 
 
-@dataclass
-class Timings:
+class Timings(BaseModel):
     inference: float = 0.0
     clustering: float = 0.0
 
 
-def checkpoint_loss_name(checkpoint: Path) -> str:
-    match = CHECKPOINT_LOSS_PATTERN.match(checkpoint.stem)
-
-    return match.group("loss") if match else "unknown"
-
-
 def output_path(loss_name: str, kind: str, suffix: str = "png") -> Path:
     return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_{kind}.{suffix}"
-
-
-def load_model(checkpoint: Path, device: torch.device) -> SpatialTransformer:
-    model_config = SpatialConfig(**load_run_config(checkpoint).get("model", {}))
-    model = SpatialTransformer(model_config).to(device)
-    state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
-    model.load_state_dict(state_dict)
-
-    return model
 
 
 def iter_events(
@@ -128,11 +110,15 @@ def evaluate(
 ) -> None:
 
     train_config = TrainConfig(batch_size=BATCH_SIZE, num_workers=num_workers)
-    model = load_model(checkpoint, device)
+    model_config = SpatialConfig(**load_run_config(checkpoint).get("model", {}))
+
+    model = load_weights(
+        SpatialTransformer(model_config).to(device), checkpoint, device
+    )
     split_files = get_splits_by_file(DATA_PATH, seed=train_config.seed)[SPLIT]
     loader = build_loader(split_files, train_config, device.type == "cuda")
 
-    stratified = StratifiedReconstruction()
+    stratified = PileupStratifiedReco()
     counts = ReconstructionCounts()
 
     timings = Timings()
@@ -144,10 +130,10 @@ def evaluate(
         predicted = cluster_labels(event.embeddings, clustering_parameters)
         timings.clustering += time.perf_counter() - start
         event_reconstruction = event_counts(predicted, event.labels, event.energy)
-        intra_distance, separation = event_geometry(event.embeddings, event.labels)
+        intra_distances, separation = geometry_metrics(event.embeddings, event.labels)
         counts.add(event_reconstruction)
         n_events += 1
-        stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
+        stratified.add(multiplicity, event_reconstruction, intra_distances, separation)
 
     print(f"events: {n_events} | latent dimensions: {model.output.out_features}")
     print(
@@ -157,11 +143,7 @@ def evaluate(
         f"({1e3 * timings.clustering / max(n_events, 1):.2f} ms/event)"
     )
 
-    print_geometry_report(SPLIT, stratified)
-
     stratified_metrics = stratified.metrics()
-
-    print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
 
     plot_by_multiplicity(
         stratified_metrics,
@@ -200,7 +182,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     checkpoint = Path(args.checkpoint)
-    loss_name = checkpoint_loss_name(checkpoint)
+    loss_name = checkpoint_loss_name(checkpoint, CHECKPOINT_LOSS_PATTERN)
     stratified_output = (
         Path(args.stratified_output)
         if args.stratified_output

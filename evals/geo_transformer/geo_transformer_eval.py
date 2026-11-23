@@ -1,4 +1,5 @@
 import argparse
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -8,13 +9,20 @@ from torch import Tensor, nn, no_grad
 from torch.utils.data import DataLoader
 
 from data import DATA_PATH, get_splits_by_file
-from evals.embedding_geometry import event_geometry
-from evals.evaluate import (
+from evals.eval_utils import (
+    EmbeddingStats,
+    accumulate_event,
     checkpoint_loss_name,
-    evaluate_loader,
-    load_model,
     load_run_config,
+    load_weights,
     print_report,
+)
+from evals.geometry_metrics import geometry_metrics
+from evals.pileup_stratified import (
+    PileupStratifiedReco,
+    event_multiplicity,
+    plot_by_multiplicity,
+    save_metrics,
 )
 from evals.reco_metrics import (
     ClusteringParameters,
@@ -23,22 +31,17 @@ from evals.reco_metrics import (
     event_counts,
     print_reconstruction_report,
 )
-from evals.stratified import (
-    StratifiedReconstruction,
-    event_multiplicity,
-    plot_by_multiplicity,
-    print_geometry_report,
-    print_stratified_table,
-    save_metrics,
-)
 from losses import build_loss
-from train.train_utils import select_device
+from models.geo_transformer import GeoTransformer
 from train.geo_transformer.geo_train import (
+    FEATURE_NAMES,
+    GEOMETRIC_FEATURE_INDICES,
     LossConfig,
     ModelConfig,
     TrainConfig,
     build_loader,
 )
+from train.train_utils import select_device
 
 MODEL_PATH = (
     Path(__file__).resolve().parents[2]
@@ -47,19 +50,20 @@ MODEL_PATH = (
     / "geo_discriminative_20261109_143754_best.pt"
 )
 EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "geo_transformer_runs"
+CHECKPOINT_LOSS_PATTERN = re.compile(r"^geo_(?P<loss>.+?)_\d{8}_\d{6}")
 SPLIT = "test"
 BATCH_SIZE = 1
 NUM_WORKERS = 2
-
-
-def output_path(loss_name: str, kind: str, suffix: str = "png") -> Path:
-    return EVAL_DATA_DIR / f"geo_transformer_{loss_name}_{kind}.{suffix}"
 
 
 class EventEmbedding(NamedTuple):
     embeddings: Tensor
     labels: Tensor
     energy: Tensor
+
+
+def output_path(loss_name: str, kind: str, suffix: str = "png") -> Path:
+    return EVAL_DATA_DIR / f"geo_transformer_{loss_name}_{kind}.{suffix}"
 
 
 def iter_event_embeddings(
@@ -86,6 +90,55 @@ def iter_event_embeddings(
             )
 
 
+def load_model(
+    checkpoint: Path,
+    model_config: ModelConfig,
+    device: torch.device,
+) -> GeoTransformer:
+
+    model = GeoTransformer(
+        in_dim=len(FEATURE_NAMES),
+        geom_idx=GEOMETRIC_FEATURE_INDICES,
+        hidden_dim=model_config.hidden_dim,
+        num_layers=model_config.num_layers,
+        n_heads=model_config.n_heads,
+        out_dim=model_config.out_dim,
+        bias_hidden=model_config.bias_hidden,
+        bias_chunk=model_config.bias_chunk,
+        ffn_mult=model_config.ffn_mult,
+        drop_path=model_config.drop_path,
+    ).to(device)
+
+    return load_weights(model, checkpoint, device)
+
+
+def evaluate_loader(
+    model: GeoTransformer,
+    loader: DataLoader,
+    loss_fn: nn.Module,
+    device: torch.device,
+) -> EmbeddingStats:
+
+    model.eval()
+    stats = EmbeddingStats()
+
+    with no_grad():
+        for cpu_batch in loader:
+            batch: Any = cpu_batch.to(device)
+            embeddings = model(batch).float()
+            stats.loss += float(loss_fn(embeddings, batch).item())
+            stats.n_batches += 1
+            event_sizes = torch.bincount(batch.batch).tolist()
+
+            for event_embeddings, event_labels in zip(
+                torch.split(embeddings, event_sizes),
+                torch.split(batch.y, event_sizes),
+            ):
+                accumulate_event(stats, event_embeddings, event_labels)
+
+    return stats
+
+
 def evaluate(
     device: torch.device,
     checkpoint: Path,
@@ -102,7 +155,7 @@ def evaluate(
     )
     saved_loss = run_config.get("loss", {})
     loss_config = LossConfig(
-        name=checkpoint_loss_name(checkpoint),
+        name=checkpoint_loss_name(checkpoint, CHECKPOINT_LOSS_PATTERN),
         kwargs=dict(saved_loss.get("kwargs", {})),
     )
 
@@ -117,21 +170,19 @@ def evaluate(
 
     event_loader = build_loader(split_files, train_config, device.type == "cuda")
     counts = ReconstructionCounts()
-    stratified = StratifiedReconstruction()
+    stratified = PileupStratifiedReco()
 
     for event in iter_event_embeddings(model, event_loader, device):
         reco_labels = cluster_labels(event.embeddings, clustering_parameters)
         event_reconstruction = event_counts(reco_labels, event.labels, event.energy)
         counts.add(event_reconstruction)
         multiplicity = event_multiplicity(event.labels)
-        intra_distance, separation = event_geometry(event.embeddings, event.labels)
+        intra_distance, separation = geometry_metrics(event.embeddings, event.labels)
         stratified.add(multiplicity, event_reconstruction, intra_distance, separation)
 
     print_reconstruction_report(SPLIT, counts)
-    print_geometry_report(SPLIT, stratified)
 
     stratified_metrics = stratified.metrics()
-    print_stratified_table(SPLIT, stratified_metrics, stratified.n_events)
     plot_by_multiplicity(
         stratified_metrics,
         stratified.n_events,
@@ -166,7 +217,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     checkpoint = Path(args.checkpoint)
-    loss_name = checkpoint_loss_name(checkpoint)
+    loss_name = checkpoint_loss_name(checkpoint, CHECKPOINT_LOSS_PATTERN)
     stratified_output = (
         Path(args.stratified_output)
         if args.stratified_output

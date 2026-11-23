@@ -1,8 +1,6 @@
-from dataclasses import dataclass
-
-import time
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch import Tensor
 
 from clustering.agglomerative import run_agglomerative
@@ -12,16 +10,14 @@ PURE_FRACTION_THRESHOLD = 0.8
 NOISE_LABEL = -1
 
 
-@dataclass
-class ClusteringParameters:
+class ClusteringParameters(BaseModel):
     distance_threshold: float = 0.05
     method: str = "average"
     metric: str = "cosine"
     min_cluster_size: int = 1
 
 
-@dataclass
-class ReconstructionCounts:
+class ReconstructionCounts(BaseModel):
     n_sim: int = 0
     n_matched: int = 0
     n_reco: int = 0

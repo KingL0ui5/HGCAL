@@ -9,20 +9,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from evals.stratified import (
+from evals.pileup_stratified import (
     IDEAL_VALUES,
     PANEL_COLUMNS,
     load_metrics,
     y_axis_top,
 )
 
-EVAL_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "geo_transformer_runs"
+EVAL_DATA_DIR = (
+    Path(__file__).resolve().parents[1] / "data" / "spatial_transformer_runs"
+)
 INFONCE_COLOR = "#2a6fdb"
 DISCRIMINATIVE_COLOR = "#e0662b"
 
 
 def default_metrics_path(loss_name: str) -> Path:
-    return EVAL_DATA_DIR / f"geo_transformer_{loss_name}_metrics.json"
+    return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_metrics.json"
 
 
 def plot_loss_comparison(
@@ -35,14 +37,17 @@ def plot_loss_comparison(
         "infonce": (load_metrics(infonce_path), INFONCE_COLOR),
         "discriminative": (load_metrics(discriminative_path), DISCRIMINATIVE_COLOR),
     }
+
     names = [
         name
         for name in series["infonce"][0][0]
         if name in series["discriminative"][0][0]
     ]
+
     keys = sorted({key for (_, n_events), _ in series.values() for key in n_events})
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
     sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
+
     figure, axes = plt.subplots(
         n_rows,
         PANEL_COLUMNS,
@@ -82,7 +87,7 @@ def plot_loss_comparison(
     for axis in axes.flat[len(names) :]:
         axis.set_visible(False)
 
-    figure.suptitle("GeoTransformer: infonce vs discriminative loss")
+    figure.suptitle("SpatialTransformer: infonce vs discriminative loss")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
@@ -91,16 +96,18 @@ def plot_loss_comparison(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Overlay infonce and discriminative GeoTransformer metrics"
+        description="Overlay infonce and discriminative SpatialTransformer metrics"
     )
+
     parser.add_argument("--infonce", type=Path, default=default_metrics_path("infonce"))
     parser.add_argument(
         "--discriminative", type=Path, default=default_metrics_path("discriminative")
     )
+
     parser.add_argument(
         "--output",
         type=Path,
-        default=EVAL_DATA_DIR / "geo_transformer_loss_comparison.png",
+        default=EVAL_DATA_DIR / "spatial_transformer_loss_comparison.png",
     )
 
     return parser.parse_args()

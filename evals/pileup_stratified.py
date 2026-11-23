@@ -1,6 +1,5 @@
 import json
 import math
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib
@@ -11,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
+from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 
 from evals.reco_metrics import ReconstructionCounts
@@ -29,48 +29,59 @@ def mean_or_nan(values: list[float]) -> float:
     return float(np.mean(values)) if values else math.nan
 
 
-@dataclass
-class MultiplicityBin:
-    counts: ReconstructionCounts = field(default_factory=ReconstructionCounts)
-    intra_distances: list[float] = field(default_factory=list)
-    separations: list[float] = field(default_factory=list)
+class PileupBin(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    counts: ReconstructionCounts = Field(default_factory=ReconstructionCounts)
+    intra_distances: list[Tensor] = Field(default_factory=list)
+    separations: list[float] = Field(default_factory=list)
     n_events: int = 0
 
 
-class StratifiedReconstruction:
+class PileupStratifiedReco:
     def __init__(self) -> None:
-        self.bins: dict[int, MultiplicityBin] = {}
+        self.bins: dict[int, PileupBin] = {}
 
     def add(
         self,
         multiplicity: int,
         counts: ReconstructionCounts,
-        intra_distance: float,
+        intra_distances: Tensor,
         separation: float | None,
     ) -> None:
 
-        stratum = self.bins.setdefault(multiplicity, MultiplicityBin())
-        stratum.counts.add(counts)
-        stratum.intra_distances.append(intra_distance)
-        stratum.n_events += 1
+        bins = self.bins.setdefault(multiplicity, PileupBin())
+        bins.counts.add(counts)
+        bins.intra_distances.append(intra_distances.abs().mean(dim=0))
+        bins.n_events += 1
 
         if separation is not None:
-            stratum.separations.append(separation)
+            bins.separations.append(separation)
 
     @property
     def n_events(self) -> dict[int, int]:
         return {key: self.bins[key].n_events for key in sorted(self.bins)}
 
     @property
-    def mean_intra_distance(self) -> float:
-        return mean_or_nan([d for b in self.bins.values() for d in b.intra_distances])
-
-    @property
     def mean_centroid_separation(self) -> float:
         return mean_or_nan([s for b in self.bins.values() for s in b.separations])
 
+    @property
+    def mean_intra_distances(self) -> list[float]:
+        per_event = [d for b in self.bins.values() for d in b.intra_distances]
+
+        return torch.stack(per_event).mean(dim=0).tolist() if per_event else []
+
     def metrics(self) -> dict[str, dict[int, float]]:
         keys = sorted(self.bins)
+
+        mean_intra_distances_by_dimension = {
+            f"cluster spread dim {dim}": {
+                k: mean_or_nan([float(d[dim]) for d in self.bins[k].intra_distances])
+                for k in keys
+            }
+            for dim in range(len(self.mean_intra_distances))
+        }
 
         return {
             "efficiency": {k: self.bins[k].counts.efficiency for k in keys},
@@ -78,36 +89,11 @@ class StratifiedReconstruction:
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
-            "average cluster spread": {
-                k: mean_or_nan(self.bins[k].intra_distances) for k in keys
-            },
             "centroid separation": {
                 k: mean_or_nan(self.bins[k].separations) for k in keys
             },
+            **mean_intra_distances_by_dimension,
         }
-
-
-def print_geometry_report(name: str, stratified: StratifiedReconstruction) -> None:
-    print(f"\n== {name}: embedding geometry ==")
-    print(f"mean cluster spread:      {stratified.mean_intra_distance:.4f}")
-    print(f"mean centroid separation: {stratified.mean_centroid_separation:.4f}")
-
-
-def print_stratified_table(
-    title: str,
-    metrics: dict[str, dict[int, float]],
-    n_events: dict[int, int],
-) -> None:
-
-    keys = sorted(n_events)
-    print(f"\n== {title}: by particle multiplicity ==")
-    print(f"{'metric':<22}" + "".join(f"{f'n={k}':>10}" for k in keys))
-    print(f"{'events':<22}" + "".join(f"{n_events[k]:>10}" for k in keys))
-
-    for name, values in metrics.items():
-        print(
-            f"{name:<22}" + "".join(f"{values.get(k, math.nan):>10.4f}" for k in keys)
-        )
 
 
 def save_metrics(
@@ -127,10 +113,12 @@ def load_metrics(
 ) -> tuple[dict[str, dict[int, float]], dict[int, int]]:
 
     payload = json.loads(input_path.read_text())
+
     metrics = {
         name: {int(key): float(value) for key, value in values.items()}
         for name, values in payload["metrics"].items()
     }
+
     n_events = {int(key): int(value) for key, value in payload["n_events"].items()}
 
     return metrics, n_events
@@ -191,6 +179,7 @@ def plot_by_multiplicity(
     figure.suptitle(
         f"{title} | events per bin: " + ", ".join(f"{k}: {n_events[k]}" for k in keys)
     )
+
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
