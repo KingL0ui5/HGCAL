@@ -1,10 +1,8 @@
-from dataclasses import dataclass
-
+from pydantic import BaseModel
 from torch import Tensor, nn
 
 
-@dataclass
-class SpatialConfig:
+class SpatialConfig(BaseModel):
     in_features: int = 4
     d_model: int = 128
     n_heads: int = 8

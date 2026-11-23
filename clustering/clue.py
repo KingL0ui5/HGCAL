@@ -1,9 +1,9 @@
 """CLUEstering wrapper with automatic GPU/CPU backend selection."""
 
-from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict
 
 try:
     import CLUEstering as clue
@@ -14,8 +14,9 @@ except ImportError:
     clue = cast("Any", None)
 
 
-@dataclass(frozen=True)
-class ClueResult:
+class ClueResult(BaseModel):
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     cluster_ids: np.ndarray
     n_clusters: int
     n_outliers: int

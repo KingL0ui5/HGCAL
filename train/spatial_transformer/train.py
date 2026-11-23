@@ -1,7 +1,6 @@
 import argparse
 import json
 import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import matplotlib
@@ -10,6 +9,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import torch
+from pydantic import BaseModel, ConfigDict
 from torch import Tensor, nn, optim
 from torch.utils import tensorboard
 from torch.utils.data import DataLoader
@@ -29,8 +29,9 @@ LOSS_CHOICES = ("infonce", "discriminative")
 TRAINING_OUTPUT_DIR = Path("trained_models/training_output")
 
 
-@dataclass
-class FlatBatch:
+class FlatBatch(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     y: Tensor
     batch: Tensor
     energy: Tensor
@@ -237,9 +238,9 @@ def main() -> None:
     (output_dir / f"{run_name}_config.json").write_text(
         json.dumps(
             {
-                "model": asdict(model_config),
+                "model": model_config.model_dump(),
                 "loss": {"name": loss_name},
-                "train": asdict(train_config),
+                "train": train_config.model_dump(),
             },
             indent=2,
         )

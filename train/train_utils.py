@@ -1,7 +1,7 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+from pydantic import BaseModel
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -13,8 +13,7 @@ from data import (
 )
 
 
-@dataclass
-class TrainConfig:
+class TrainConfig(BaseModel):
     batch_size: int = 8
     learning_rate: float = 3e-4
     weight_decay: float = 1e-2

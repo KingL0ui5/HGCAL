@@ -4,10 +4,10 @@ import json
 import math
 import time
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor, nn, optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils import tensorboard
@@ -30,8 +30,7 @@ GEOMETRIC_FEATURE_INDICES = [0, 1, 2, 4, 5, 6]
 RHO_MIN = 1e-6
 
 
-@dataclass
-class ModelConfig:
+class ModelConfig(BaseModel):
     hidden_dim: int = 128
     num_layers: int = 6
     n_heads: int = 8
@@ -42,14 +41,12 @@ class ModelConfig:
     drop_path: float = 0.1
 
 
-@dataclass
-class LossConfig:
+class LossConfig(BaseModel):
     name: str = "infonce"
-    kwargs: dict[str, float] = field(default_factory=dict)
+    kwargs: dict[str, float] = Field(default_factory=dict)
 
 
-@dataclass
-class TrainConfig:
+class TrainConfig(BaseModel):
     batch_size: int = 8
     learning_rate: float = 3e-4
     weight_decay: float = 1e-2
@@ -322,7 +319,7 @@ def main() -> None:
     model = GeoTransformer(
         in_dim=len(FEATURE_NAMES),
         geom_idx=GEOMETRIC_FEATURE_INDICES,
-        **asdict(model_config),
+        **model_config.model_dump(),
     ).to(device)
 
     loss_fn = build_loss(loss_config.name, **loss_config.kwargs).to(device)
@@ -334,9 +331,9 @@ def main() -> None:
     (Path(train_config.output_dir) / f"{run_name}_config.json").write_text(
         json.dumps(
             {
-                "model": asdict(model_config),
-                "loss": asdict(loss_config),
-                "train": asdict(train_config),
+                "model": model_config.model_dump(),
+                "loss": loss_config.model_dump(),
+                "train": train_config.model_dump(),
                 "features": FEATURE_NAMES,
                 "geom_idx": GEOMETRIC_FEATURE_INDICES,
             },
