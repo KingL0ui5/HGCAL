@@ -2,7 +2,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 import torch
 from pydantic import BaseModel, ConfigDict
@@ -12,6 +12,17 @@ from data import DATA_PATH
 from evals.geometry_metrics import geometry_metrics
 
 ModelT = TypeVar("ModelT", bound=nn.Module)
+
+
+class EventOutputs(NamedTuple):
+    embeddings: Tensor
+    labels: Tensor
+    energy: Tensor
+
+
+class Timings(BaseModel):
+    inference: float = 0.0
+    clustering: float = 0.0
 
 
 class EmbeddingStats(BaseModel):
