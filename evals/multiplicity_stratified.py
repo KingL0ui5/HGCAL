@@ -23,6 +23,10 @@ IDEAL_VALUES = {"multiplicity ratio": 1.0}
 UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
 SPREAD_RATIO_NAME = "mean intra-cluster spread/mean centroid separation"
+OVERLAP_LINE_COLOR = "#c0392b"
+# isotropic 3D gaussians of width s: mean distance to centre is s * sqrt(8 / pi),
+# and two equal gaussians merge into one peak once their centres are closer than 2s
+GAUSSIAN_OVERLAP_RATIO = math.sqrt(8.0 / math.pi) / 2.0
 TITLE_WIDTH = 34
 
 
@@ -158,6 +162,21 @@ def panel_title(name: str) -> str:
     return textwrap.fill(name, TITLE_WIDTH)
 
 
+def plot_overlap_line(axis: plt.Axes, name: str) -> list[float]:
+    if name != SPREAD_RATIO_NAME:
+        return []
+
+    axis.axhline(
+        GAUSSIAN_OVERLAP_RATIO,
+        color=OVERLAP_LINE_COLOR,
+        linestyle=":",
+        linewidth=1.5,
+        label=f"gaussian overlap ({GAUSSIAN_OVERLAP_RATIO:.2f})",
+    )
+
+    return [GAUSSIAN_OVERLAP_RATIO]
+
+
 def plot_input_line(
     axis: plt.Axes,
     metrics: dict[str, dict[int, float]],
@@ -261,6 +280,7 @@ def plot_spread_ratios(
         legend=False,
     )
     values += plot_input_line(axis, metrics, SPREAD_RATIO_NAME, keys)
+    values += plot_overlap_line(axis, SPREAD_RATIO_NAME)
 
     axis.legend(loc="best")
     axis.set_xticks(keys)

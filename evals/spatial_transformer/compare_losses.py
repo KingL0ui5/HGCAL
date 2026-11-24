@@ -17,6 +17,7 @@ from evals.multiplicity_stratified import (
     panel_names,
     panel_title,
     plot_input_line,
+    plot_overlap_line,
     y_axis_top,
 )
 from evals.reco_metrics import CLUSTERING_ALGORITHMS
@@ -79,6 +80,7 @@ def plot_loss_comparison(
             )
 
         all_values.extend(plot_input_line(axis, series["infonce"][0][0], name, keys))
+        all_values.extend(plot_overlap_line(axis, name))
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
