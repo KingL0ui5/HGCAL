@@ -24,7 +24,7 @@ SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 EVAL_SET="${EVAL_SET:-all}"
 CLUSTERING="${CLUSTERING:-clue}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
-BOOST_MODULE="${BOOST_MODULE:-}"
+BOOST_MODULE="${BOOST_MODULE:-Boost/1.88.0-GCC-14.3.0}"
 
 if [ "$CLUSTERING" = "clue" ] && [ -n "$BOOST_MODULE" ]; then
     module load tools/prod
