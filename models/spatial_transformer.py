@@ -6,7 +6,7 @@ class SpatialConfig(BaseModel):
     in_features: int = 4
     d_model: int = 128
     n_heads: int = 8
-    n_layers: int = 4
+    n_layers: int = 3
     dim_feedforward: int = 512
     dropout: float = 0.1
     out_dim: int = 3

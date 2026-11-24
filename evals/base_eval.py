@@ -20,7 +20,7 @@ from evals.eval_utils import (
     load_run_config,
     load_weights,
 )
-from evals.geometry_metrics import geometry_metrics
+from evals.geometry_metrics import event_geometry
 from evals.multiplicity_stratified import (
     MultiplicityStratifiedReco,
     event_multiplicity,
@@ -197,24 +197,17 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             self.timings.clustering += time.perf_counter() - start
 
             reconstruction = event_counts(reco_labels, event.labels, event.energy)
-            intra_distances, separation = geometry_metrics(
-                event.embeddings, event.labels
-            )
-            input_intra_distances, input_separation = geometry_metrics(
-                event.positions, event.labels
-            )
+            multiplicity = event_multiplicity(event.labels)
 
             counts.add(reconstruction)
             stratified.add(
-                event_multiplicity(event.labels),
+                multiplicity,
                 reconstruction,
-                intra_distances,
-                separation,
+                event_geometry(event.embeddings, event.labels),
             )
             stratified.add_input_geometry(
-                event_multiplicity(event.labels),
-                input_intra_distances,
-                input_separation,
+                multiplicity,
+                event_geometry(event.positions, event.labels),
             )
 
             latent_dimensions = int(event.embeddings.shape[1])

@@ -17,7 +17,7 @@ class TrainConfig(BaseModel):
     batch_size: int = 8
     learning_rate: float = 3e-4
     weight_decay: float = 1e-2
-    n_epochs: int = 20
+    n_epochs: int = 50
     log_every: int = 100
     grad_clip: float = 1.0
     seed: int = 42
