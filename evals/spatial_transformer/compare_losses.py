@@ -9,10 +9,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from evals.pileup_stratified import (
+from evals.multiplicity_stratified import (
     IDEAL_VALUES,
+    INPUT_PREFIX,
     PANEL_COLUMNS,
     load_metrics,
+    panel_names,
+    panel_title,
+    plot_input_line,
     y_axis_top,
 )
 
@@ -40,7 +44,7 @@ def plot_loss_comparison(
 
     names = [
         name
-        for name in series["infonce"][0][0]
+        for name in panel_names(series["infonce"][0][0])
         if name in series["discriminative"][0][0]
     ]
 
@@ -73,16 +77,20 @@ def plot_loss_comparison(
                 legend=False,
             )
 
+        all_values.extend(plot_input_line(axis, series["infonce"][0][0], name, keys))
+
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
         axis.set_xlabel("multiplicity")
-        axis.set_title(name)
+        axis.set_title(panel_title(name))
         sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, all_values))
 
-    axes.flat[0].legend(loc="best")
+    for index, (axis, name) in enumerate(zip(axes.flat, names)):
+        if index == 0 or INPUT_PREFIX + name in series["infonce"][0][0]:
+            axis.legend(loc="best")
 
     for axis in axes.flat[len(names) :]:
         axis.set_visible(False)

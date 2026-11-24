@@ -1,5 +1,6 @@
 import json
 import math
+import textwrap
 from pathlib import Path
 
 import matplotlib
@@ -16,9 +17,12 @@ from torch import Tensor
 from evals.reco_metrics import ReconstructionCounts
 
 LINE_COLOR = "#2a6fdb"
+INPUT_LINE_COLOR = "#8a8a8a"
+INPUT_PREFIX = "input "
 IDEAL_VALUES = {"multiplicity ratio": 1.0}
 UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
+TITLE_WIDTH = 34
 
 
 def event_multiplicity(labels: Tensor) -> int:
@@ -29,20 +33,37 @@ def mean_or_nan(values: list[float]) -> float:
     return float(np.mean(values)) if values else math.nan
 
 
-class PileupBin(BaseModel):
+class MultiplicityBin(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     counts: ReconstructionCounts = Field(default_factory=ReconstructionCounts)
-    intra_distances: list[Tensor] = Field(default_factory=list)
-    separations: list[float] = Field(default_factory=list)
-    input_intra_distances: list[Tensor] = Field(default_factory=list)
-    input_separations: list[float] = Field(default_factory=list)
+    spread_ratios: list[Tensor] = Field(default_factory=list)
+    input_spread_ratios: list[Tensor] = Field(default_factory=list)
     n_events: int = 0
 
 
-class PileupStratifiedReco:
+def spread_ratio(intra_distances: Tensor, separation: float) -> Tensor:
+    return intra_distances.abs().mean(dim=0) / separation
+
+
+def spread_ratio_by_dimension(
+    ratios: dict[int, list[Tensor]],
+    prefix: str = "",
+) -> dict[str, dict[int, float]]:
+
+    n_dimensions = next((len(r) for rs in ratios.values() for r in rs), 0)
+
+    return {
+        f"{prefix}mean intra-cluster spread/mean centroid separation dim {dim}": {
+            k: mean_or_nan([float(r[dim]) for r in rs]) for k, rs in ratios.items()
+        }
+        for dim in range(n_dimensions)
+    }
+
+
+class MultiplicityStratifiedReco:
     def __init__(self) -> None:
-        self.bins: dict[int, PileupBin] = {}
+        self.bins: dict[int, MultiplicityBin] = {}
 
     def add(
         self,
@@ -52,13 +73,12 @@ class PileupStratifiedReco:
         separation: float | None,
     ) -> None:
 
-        bins = self.bins.setdefault(multiplicity, PileupBin())
+        bins = self.bins.setdefault(multiplicity, MultiplicityBin())
         bins.counts.add(counts)
-        bins.intra_distances.append(intra_distances.abs().mean(dim=0))
         bins.n_events += 1
 
         if separation is not None:
-            bins.separations.append(separation)
+            bins.spread_ratios.append(spread_ratio(intra_distances, separation))
 
     def add_input_geometry(
         self,
@@ -67,49 +87,17 @@ class PileupStratifiedReco:
         separation: float | None,
     ) -> None:
 
-        bins = self.bins.setdefault(multiplicity, PileupBin())
-        bins.input_intra_distances.append(intra_distances.abs().mean(dim=0))
+        bins = self.bins.setdefault(multiplicity, MultiplicityBin())
 
         if separation is not None:
-            bins.input_separations.append(separation)
+            bins.input_spread_ratios.append(spread_ratio(intra_distances, separation))
 
     @property
     def n_events(self) -> dict[int, int]:
         return {key: self.bins[key].n_events for key in sorted(self.bins)}
 
-    @property
-    def mean_centroid_separation(self) -> float:
-        return mean_or_nan([s for b in self.bins.values() for s in b.separations])
-
-    @property
-    def mean_intra_distances(self) -> list[float]:
-        per_event = [d for b in self.bins.values() for d in b.intra_distances]
-
-        return torch.stack(per_event).mean(dim=0).tolist() if per_event else []
-
     def metrics(self) -> dict[str, dict[int, float]]:
         keys = sorted(self.bins)
-
-        mean_intra_distances_by_dimension = {
-            f"cluster spread dim {dim}": {
-                k: mean_or_nan([float(d[dim]) for d in self.bins[k].intra_distances])
-                for k in keys
-            }
-            for dim in range(len(self.mean_intra_distances))
-        }
-
-        n_input_dimensions = next(
-            (len(d) for b in self.bins.values() for d in b.input_intra_distances), 0
-        )
-        input_intra_distances_by_dimension = {
-            f"input cluster spread dim {dim}": {
-                k: mean_or_nan(
-                    [float(d[dim]) for d in self.bins[k].input_intra_distances]
-                )
-                for k in keys
-            }
-            for dim in range(n_input_dimensions)
-        }
 
         return {
             "efficiency": {k: self.bins[k].counts.efficiency for k in keys},
@@ -117,14 +105,10 @@ class PileupStratifiedReco:
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
-            "centroid separation": {
-                k: mean_or_nan(self.bins[k].separations) for k in keys
-            },
-            **mean_intra_distances_by_dimension,
-            "input centroid separation": {
-                k: mean_or_nan(self.bins[k].input_separations) for k in keys
-            },
-            **input_intra_distances_by_dimension,
+            **spread_ratio_by_dimension({k: self.bins[k].spread_ratios for k in keys}),
+            **spread_ratio_by_dimension(
+                {k: self.bins[k].input_spread_ratios for k in keys}, INPUT_PREFIX
+            ),
         }
 
 
@@ -166,6 +150,41 @@ def y_axis_top(name: str, values: list[float]) -> float:
     return peak * 1.15
 
 
+def panel_names(metrics: dict[str, dict[int, float]]) -> list[str]:
+    return [name for name in metrics if not name.startswith(INPUT_PREFIX)]
+
+
+def panel_title(name: str) -> str:
+    return textwrap.fill(name, TITLE_WIDTH)
+
+
+def plot_input_line(
+    axis: plt.Axes,
+    metrics: dict[str, dict[int, float]],
+    name: str,
+    keys: list[int],
+) -> list[float]:
+
+    if INPUT_PREFIX + name not in metrics:
+        return []
+
+    values = [metrics[INPUT_PREFIX + name].get(k, math.nan) for k in keys]
+    sns.lineplot(
+        x=keys,
+        y=values,
+        ax=axis,
+        color=INPUT_LINE_COLOR,
+        linewidth=2,
+        linestyle="--",
+        marker="s",
+        markersize=6,
+        label="input",
+        legend=False,
+    )
+
+    return values
+
+
 def plot_by_multiplicity(
     metrics: dict[str, dict[int, float]],
     n_events: dict[int, int],
@@ -173,7 +192,7 @@ def plot_by_multiplicity(
     output_path: Path,
 ) -> None:
 
-    names = list(metrics)
+    names = panel_names(metrics)
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
     sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
@@ -194,14 +213,20 @@ def plot_by_multiplicity(
             linewidth=2,
             marker="o",
             markersize=8,
+            label="output",
+            legend=False,
         )
+        values += plot_input_line(axis, metrics, name, keys)
+
+        if INPUT_PREFIX + name in metrics:
+            axis.legend(loc="best")
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
 
         axis.set_xticks(keys)
         axis.set_xlabel("multiplicity")
-        axis.set_title(name)
+        axis.set_title(panel_title(name))
         sns.despine(ax=axis)
         axis.set_ylim(0.0, y_axis_top(name, values))
 

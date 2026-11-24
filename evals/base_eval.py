@@ -21,8 +21,8 @@ from evals.eval_utils import (
     load_weights,
 )
 from evals.geometry_metrics import geometry_metrics
-from evals.pileup_stratified import (
-    PileupStratifiedReco,
+from evals.multiplicity_stratified import (
+    MultiplicityStratifiedReco,
     event_multiplicity,
     plot_by_multiplicity,
     save_metrics,
@@ -164,7 +164,7 @@ class BaseEvaluator(ABC, Generic[ModelT]):
     def evaluate(self) -> None:
         print(f"{self.display_name} | loss: {self.loss_name} | device: {self.device}")
         counts = ReconstructionCounts()
-        stratified = PileupStratifiedReco()
+        stratified = MultiplicityStratifiedReco()
         latent_dimensions = 0
 
         for event in self.iter_events(self.build_loader(self.split_files)):
@@ -200,7 +200,7 @@ class BaseEvaluator(ABC, Generic[ModelT]):
     def report(
         self,
         counts: ReconstructionCounts,
-        stratified: PileupStratifiedReco,
+        stratified: MultiplicityStratifiedReco,
         latent_dimensions: int,
     ) -> None:
 

@@ -77,7 +77,7 @@ def print_report(name: str, stats: EmbeddingStats) -> None:
 
     if stats.intra_distance is not None:
         for dim, spread in enumerate((stats.intra_distance / stats.n_events).tolist()):
-            print(f"mean cluster spread dim {dim}: {spread:.4f}")
+            print(f"mean intra-cluster spread dim {dim}: {spread:.4f}")
 
     print(
         f"mean centroid separation: "
