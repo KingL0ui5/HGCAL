@@ -25,6 +25,7 @@ from evals.multiplicity_stratified import (
     MultiplicityStratifiedReco,
     event_multiplicity,
     plot_by_multiplicity,
+    plot_spread_ratios,
     save_metrics,
 )
 from evals.reco_metrics import (
@@ -74,6 +75,7 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             if args.metrics_output
             else self.output_path("metrics", "json")
         )
+        self.spread_ratio_path = self.output_path("spread_ratio")
         self.timings = Timings()
 
     @classmethod
@@ -222,6 +224,14 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             self.stratified_path,
         )
         print(f"stratified plot saved to {self.stratified_path}")
+
+        plot_spread_ratios(
+            stratified_metrics,
+            stratified.n_events,
+            f"{self.display_name} {self.loss_name}",
+            self.spread_ratio_path,
+        )
+        print(f"spread ratio plot saved to {self.spread_ratio_path}")
 
         save_metrics(stratified_metrics, stratified.n_events, self.metrics_path)
         print(f"metrics saved to {self.metrics_path}")

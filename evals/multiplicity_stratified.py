@@ -22,6 +22,7 @@ INPUT_PREFIX = "input "
 IDEAL_VALUES = {"multiplicity ratio": 1.0}
 UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
+SPREAD_RATIO_NAME = "mean intra-cluster spread/mean centroid separation"
 TITLE_WIDTH = 34
 
 
@@ -54,7 +55,7 @@ def spread_ratio_by_dimension(
     n_dimensions = next((len(r) for rs in ratios.values() for r in rs), 0)
 
     return {
-        f"{prefix}mean intra-cluster spread/mean centroid separation dim {dim}": {
+        f"{prefix}{SPREAD_RATIO_NAME} dim {dim}": {
             k: mean_or_nan([float(r[dim]) for r in rs]) for k, rs in ratios.items()
         }
         for dim in range(n_dimensions)
@@ -154,6 +155,14 @@ def panel_names(metrics: dict[str, dict[int, float]]) -> list[str]:
     return [name for name in metrics if not name.startswith(INPUT_PREFIX)]
 
 
+def spread_ratio_names(metrics: dict[str, dict[int, float]]) -> list[str]:
+    return [name for name in panel_names(metrics) if SPREAD_RATIO_NAME in name]
+
+
+def reco_metric_names(metrics: dict[str, dict[int, float]]) -> list[str]:
+    return [name for name in panel_names(metrics) if SPREAD_RATIO_NAME not in name]
+
+
 def panel_title(name: str) -> str:
     return textwrap.fill(name, TITLE_WIDTH)
 
@@ -178,7 +187,7 @@ def plot_input_line(
         linestyle="--",
         marker="s",
         markersize=6,
-        label="input",
+        label="input data",
         legend=False,
     )
 
@@ -192,7 +201,7 @@ def plot_by_multiplicity(
     output_path: Path,
 ) -> None:
 
-    names = panel_names(metrics)
+    names = reco_metric_names(metrics)
     n_rows = math.ceil(len(names) / PANEL_COLUMNS)
     sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
@@ -213,13 +222,7 @@ def plot_by_multiplicity(
             linewidth=2,
             marker="o",
             markersize=8,
-            label="output",
-            legend=False,
         )
-        values += plot_input_line(axis, metrics, name, keys)
-
-        if INPUT_PREFIX + name in metrics:
-            axis.legend(loc="best")
 
         if name in IDEAL_VALUES:
             axis.axhline(IDEAL_VALUES[name], color="grey", linestyle="--", linewidth=1)
@@ -237,6 +240,53 @@ def plot_by_multiplicity(
         f"{title} | events per bin: " + ", ".join(f"{k}: {n_events[k]}" for k in keys)
     )
 
+    figure.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=150)
+    plt.close(figure)
+
+
+def plot_spread_ratios(
+    metrics: dict[str, dict[int, float]],
+    n_events: dict[int, int],
+    title: str,
+    output_path: Path,
+) -> None:
+
+    names = spread_ratio_names(metrics)
+    keys = sorted(n_events)
+    sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
+    figure, axes = plt.subplots(
+        1,
+        len(names),
+        figsize=(4.2 * len(names), 3.8),
+        squeeze=False,
+    )
+
+    for dim, (axis, name) in enumerate(zip(axes.flat, names)):
+        values = [metrics[name].get(k, math.nan) for k in keys]
+        sns.lineplot(
+            x=keys,
+            y=values,
+            ax=axis,
+            color=LINE_COLOR,
+            linewidth=2,
+            marker="o",
+            markersize=8,
+            label="latent space",
+            legend=False,
+        )
+        values += plot_input_line(axis, metrics, name, keys)
+
+        axis.legend(loc="best")
+        axis.set_xticks(keys)
+        axis.set_xlabel("multiplicity")
+        axis.set_title(f"dim {dim}")
+        sns.despine(ax=axis)
+        axis.set_ylim(0.0, y_axis_top(name, values))
+
+    axes.flat[0].set_ylabel(panel_title(SPREAD_RATIO_NAME))
+    figure.suptitle(f"{title} | {SPREAD_RATIO_NAME}")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
