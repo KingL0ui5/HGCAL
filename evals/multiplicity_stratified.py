@@ -38,27 +38,22 @@ class MultiplicityBin(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     counts: ReconstructionCounts = Field(default_factory=ReconstructionCounts)
-    spread_ratios: list[Tensor] = Field(default_factory=list)
-    input_spread_ratios: list[Tensor] = Field(default_factory=list)
+    spread_ratios: list[float] = Field(default_factory=list)
+    input_spread_ratios: list[float] = Field(default_factory=list)
     n_events: int = 0
 
 
-def spread_ratio(intra_distances: Tensor, separation: float) -> Tensor:
-    return intra_distances.abs().mean(dim=0) / separation
+def spread_ratio(intra_distances: Tensor, separation: float) -> float:
+    return float(intra_distances.norm(dim=1).mean().item()) / separation
 
 
-def spread_ratio_by_dimension(
-    ratios: dict[int, list[Tensor]],
+def spread_ratio_metric(
+    ratios: dict[int, list[float]],
     prefix: str = "",
 ) -> dict[str, dict[int, float]]:
 
-    n_dimensions = next((len(r) for rs in ratios.values() for r in rs), 0)
-
     return {
-        f"{prefix}{SPREAD_RATIO_NAME} dim {dim}": {
-            k: mean_or_nan([float(r[dim]) for r in rs]) for k, rs in ratios.items()
-        }
-        for dim in range(n_dimensions)
+        f"{prefix}{SPREAD_RATIO_NAME}": {k: mean_or_nan(rs) for k, rs in ratios.items()}
     }
 
 
@@ -106,8 +101,8 @@ class MultiplicityStratifiedReco:
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
-            **spread_ratio_by_dimension({k: self.bins[k].spread_ratios for k in keys}),
-            **spread_ratio_by_dimension(
+            **spread_ratio_metric({k: self.bins[k].spread_ratios for k in keys}),
+            **spread_ratio_metric(
                 {k: self.bins[k].input_spread_ratios for k in keys}, INPUT_PREFIX
             ),
         }
@@ -153,10 +148,6 @@ def y_axis_top(name: str, values: list[float]) -> float:
 
 def panel_names(metrics: dict[str, dict[int, float]]) -> list[str]:
     return [name for name in metrics if not name.startswith(INPUT_PREFIX)]
-
-
-def spread_ratio_names(metrics: dict[str, dict[int, float]]) -> list[str]:
-    return [name for name in panel_names(metrics) if SPREAD_RATIO_NAME in name]
 
 
 def reco_metric_names(metrics: dict[str, dict[int, float]]) -> list[str]:
@@ -253,40 +244,32 @@ def plot_spread_ratios(
     output_path: Path,
 ) -> None:
 
-    names = spread_ratio_names(metrics)
     keys = sorted(n_events)
     sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
-    figure, axes = plt.subplots(
-        1,
-        len(names),
-        figsize=(4.2 * len(names), 3.8),
-        squeeze=False,
+    figure, axis = plt.subplots(figsize=(6.0, 4.2))
+
+    values = [metrics[SPREAD_RATIO_NAME].get(k, math.nan) for k in keys]
+    sns.lineplot(
+        x=keys,
+        y=values,
+        ax=axis,
+        color=LINE_COLOR,
+        linewidth=2,
+        marker="o",
+        markersize=8,
+        label="latent space",
+        legend=False,
     )
+    values += plot_input_line(axis, metrics, SPREAD_RATIO_NAME, keys)
 
-    for dim, (axis, name) in enumerate(zip(axes.flat, names)):
-        values = [metrics[name].get(k, math.nan) for k in keys]
-        sns.lineplot(
-            x=keys,
-            y=values,
-            ax=axis,
-            color=LINE_COLOR,
-            linewidth=2,
-            marker="o",
-            markersize=8,
-            label="latent space",
-            legend=False,
-        )
-        values += plot_input_line(axis, metrics, name, keys)
+    axis.legend(loc="best")
+    axis.set_xticks(keys)
+    axis.set_xlabel("multiplicity")
+    axis.set_ylabel(panel_title(SPREAD_RATIO_NAME))
+    axis.set_title(title)
+    sns.despine(ax=axis)
+    axis.set_ylim(0.0, y_axis_top(SPREAD_RATIO_NAME, values))
 
-        axis.legend(loc="best")
-        axis.set_xticks(keys)
-        axis.set_xlabel("multiplicity")
-        axis.set_title(f"dim {dim}")
-        sns.despine(ax=axis)
-        axis.set_ylim(0.0, y_axis_top(name, values))
-
-    axes.flat[0].set_ylabel(panel_title(SPREAD_RATIO_NAME))
-    figure.suptitle(f"{title} | {SPREAD_RATIO_NAME}")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)
