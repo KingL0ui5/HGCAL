@@ -23,25 +23,25 @@ SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 
 EVAL_SET="${EVAL_SET:-all}"
 
-latest_spatial_checkpoint() {
-    ls -t trained_models/spatial_transformer/spatial_"$1"_*_best.pt 2>/dev/null | head -n 1 || true
+latest_checkpoint() {
+    ls -t trained_models/"$1"/"$2"_"$3"_*_best.pt 2>/dev/null | head -n 1 || true
 }
 
-EXISTING_EVALS=(
-    "$GEO_MODULE trained_models/geo_transformer/geo_infonce_20261112_070054_best.pt"
-    "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
+GEO_EVALS=(
+    "$GEO_MODULE $(latest_checkpoint geo_transformer geo infonce)"
+    "$GEO_MODULE $(latest_checkpoint geo_transformer geo discriminative)"
 )
 
 SPATIAL_EVALS=(
-    "$SPATIAL_MODULE $(latest_spatial_checkpoint infonce)"
-    "$SPATIAL_MODULE $(latest_spatial_checkpoint discriminative)"
+    "$SPATIAL_MODULE $(latest_checkpoint spatial_transformer spatial infonce)"
+    "$SPATIAL_MODULE $(latest_checkpoint spatial_transformer spatial discriminative)"
 )
 
 case "$EVAL_SET" in
-    all) EVALS=("${EXISTING_EVALS[@]}" "${SPATIAL_EVALS[@]}") ;;
+    all) EVALS=("${GEO_EVALS[@]}" "${SPATIAL_EVALS[@]}") ;;
     spatial) EVALS=("${SPATIAL_EVALS[@]}") ;;
-    existing) EVALS=("${EXISTING_EVALS[@]}") ;;
-    *) echo "unknown EVAL_SET: $EVAL_SET (use all, spatial or existing)" >&2; exit 1 ;;
+    geo) EVALS=("${GEO_EVALS[@]}") ;;
+    *) echo "unknown EVAL_SET: $EVAL_SET (use all, spatial or geo)" >&2; exit 1 ;;
 esac
 
 mkdir -p evals/data/geo_transformer_runs evals/data/spatial_transformer_runs

@@ -1,5 +1,6 @@
 #!/bin/bash
-#PBS -N train_model
+#PBS -N train_models
+#PBS -J 0-3
 #PBS -l select=1:ncpus=4:mem=24gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=04:00:00
 
@@ -20,12 +21,24 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
-TRAIN_MODULE="${TRAIN_MODULE:-train.geo_transformer.geo_train}"
-LOSS="${LOSS:-infonce}"
+SPATIAL_MODULE="train.spatial_transformer.train"
+GEO_MODULE="train.geo_transformer.geo_train"
 
-case "$TRAIN_MODULE" in
-    train.spatial_transformer.*) OUTPUT_DIR="trained_models/spatial_transformer" ;;
-    *) OUTPUT_DIR="trained_models/geo_transformer" ;;
-esac
+RUNS=(
+    "$SPATIAL_MODULE infonce trained_models/spatial_transformer"
+    "$SPATIAL_MODULE discriminative trained_models/spatial_transformer"
+    "$GEO_MODULE infonce trained_models/geo_transformer"
+    "$GEO_MODULE discriminative trained_models/geo_transformer"
+)
 
-.venv/bin/python -m "$TRAIN_MODULE" --loss "$LOSS" --output-dir "$OUTPUT_DIR"
+RUN_INDEX="${PBS_ARRAY_INDEX:-0}"
+
+if [ "$RUN_INDEX" -ge "${#RUNS[@]}" ]; then
+    echo "no run for array index $RUN_INDEX (have ${#RUNS[@]})" >&2
+    exit 1
+fi
+
+read -r module loss output_dir <<< "${RUNS[$RUN_INDEX]}"
+echo "=== run $RUN_INDEX: $module --loss $loss -> $output_dir ==="
+
+.venv/bin/python -m "$module" --loss "$loss" --output-dir "$output_dir"
