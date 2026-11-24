@@ -22,6 +22,14 @@ GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
 SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 
 EVAL_SET="${EVAL_SET:-all}"
+CLUSTERING="${CLUSTERING:-clue}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+BOOST_MODULE="${BOOST_MODULE:-}"
+
+if [ "$CLUSTERING" = "clue" ] && [ -n "$BOOST_MODULE" ]; then
+    module load tools/prod
+    module load "$BOOST_MODULE"
+fi
 
 latest_checkpoint() {
     ls -t trained_models/"$1"/"$2"_"$3"_*_best.pt 2>/dev/null | head -n 1 || true
@@ -50,6 +58,10 @@ uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
 
+if [ "$CLUSTERING" = "clue" ]; then
+    .venv/bin/python -c "from clustering.clue import probe_backend; print('clue backend:', probe_backend())"
+fi
+
 failed=0
 
 for entry in "${EVALS[@]}"; do
@@ -67,9 +79,10 @@ for entry in "${EVALS[@]}"; do
     esac
 
     run_name="$(basename "$checkpoint" .pt)"
-    echo "=== evaluating $checkpoint with $module ==="
+    echo "=== evaluating $checkpoint with $module ($CLUSTERING) ==="
 
-    if ! .venv/bin/python -m "$module" --checkpoint "$checkpoint" 2>&1 | tee "$runs_dir/eval_${run_name}_${PBS_JOBID}.out"; then
+    # shellcheck disable=SC2086
+    if ! .venv/bin/python -m "$module" --checkpoint "$checkpoint" --clustering "$CLUSTERING" $EXTRA_ARGS 2>&1 | tee "$runs_dir/eval_${run_name}_${CLUSTERING}_${PBS_JOBID}.out"; then
         echo "eval failed: $checkpoint" >&2
         failed=$((failed + 1))
     fi

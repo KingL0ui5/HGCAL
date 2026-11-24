@@ -29,6 +29,7 @@ from evals.multiplicity_stratified import (
     save_metrics,
 )
 from evals.reco_metrics import (
+    CLUSTERING_ALGORITHMS,
     ClusteringParameters,
     ReconstructionCounts,
     cluster_labels,
@@ -55,10 +56,19 @@ class BaseEvaluator(ABC, Generic[ModelT]):
         self.num_workers = int(args.num_workers)
         self.max_events = int(args.max_events) if args.max_events is not None else None
         self.clustering_parameters = ClusteringParameters(
+            algorithm=str(args.clustering),
             distance_threshold=float(args.distance_threshold),
             method=str(args.linkage_method),
             metric=str(args.metric),
             min_cluster_size=int(args.min_cluster_size),
+            density_radius=float(args.density_radius),
+            min_density=float(args.min_density),
+            outlier_distance=(
+                float(args.outlier_distance)
+                if args.outlier_distance is not None
+                else None
+            ),
+            clue_backend=str(args.clue_backend),
         )
         self.run_config = load_run_config(self.checkpoint)
         self.seed = int(
@@ -102,6 +112,17 @@ class BaseEvaluator(ABC, Generic[ModelT]):
         parser.add_argument(
             "--min-cluster-size", type=int, default=defaults.min_cluster_size
         )
+        parser.add_argument(
+            "--clustering", choices=CLUSTERING_ALGORITHMS, default=defaults.algorithm
+        )
+        parser.add_argument(
+            "--density-radius", type=float, default=defaults.density_radius
+        )
+        parser.add_argument("--min-density", type=float, default=defaults.min_density)
+        parser.add_argument(
+            "--outlier-distance", type=float, default=defaults.outlier_distance
+        )
+        parser.add_argument("--clue-backend", default=defaults.clue_backend)
         cls.add_arguments(parser)
 
         return parser
@@ -144,7 +165,8 @@ class BaseEvaluator(ABC, Generic[ModelT]):
         return (
             EVAL_DATA_DIR
             / f"{self.output_prefix}_runs"
-            / f"{self.output_prefix}_{self.loss_name}_{kind}.{suffix}"
+            / f"{self.output_prefix}_{self.loss_name}_"
+            f"{self.clustering_parameters.algorithm}_{kind}.{suffix}"
         )
 
     def iter_events(self, loader: DataLoader) -> Iterator[EventOutputs]:
@@ -211,7 +233,8 @@ class BaseEvaluator(ABC, Generic[ModelT]):
         print(
             f"inference time: {self.timings.inference:.2f}s "
             f"({1e3 * self.timings.inference / max(n_events, 1):.2f} ms/event) | "
-            f"agglomerative clustering time: {self.timings.clustering:.2f}s "
+            f"{self.clustering_parameters.algorithm} clustering time: "
+            f"{self.timings.clustering:.2f}s "
             f"({1e3 * self.timings.clustering / max(n_events, 1):.2f} ms/event)"
         )
         print_reconstruction_report(self.split, counts)

@@ -1,20 +1,29 @@
+from functools import cache
+
 import numpy as np
 import torch
 from pydantic import BaseModel
 from torch import Tensor
 
 from clustering.agglomerative import run_agglomerative
+from clustering.clue import probe_backend, run_clue
 
+CLUSTERING_ALGORITHMS = ("agglomerative", "clue")
 MATCH_ENERGY_FRACTION = 0.7
 PURE_FRACTION_THRESHOLD = 0.8
 NOISE_LABEL = -1
 
 
 class ClusteringParameters(BaseModel):
+    algorithm: str = "agglomerative"
     distance_threshold: float = 0.05
     method: str = "average"
     metric: str = "cosine"
     min_cluster_size: int = 1
+    density_radius: float = 0.1
+    min_density: float = 5.0
+    outlier_distance: float | None = None
+    clue_backend: str = "auto"
 
 
 class ReconstructionCounts(BaseModel):
@@ -52,13 +61,36 @@ def drop_small_clusters(labels: Tensor, min_cluster_size: int) -> Tensor:
     return labels.masked_fill(is_small, NOISE_LABEL)
 
 
-def cluster_labels(embeddings: Tensor, parameters: ClusteringParameters) -> Tensor:
-    labels = run_agglomerative(
-        embeddings.detach().cpu().numpy(),
-        parameters.distance_threshold,
-        method=parameters.method,
-        metric=parameters.metric,
+@cache
+def resolved_clue_backend(requested: str) -> str:
+    return requested if requested != "auto" else probe_backend(requested)
+
+
+def clue_labels(embeddings: np.ndarray, parameters: ClusteringParameters) -> np.ndarray:
+    result = run_clue(
+        embeddings,
+        np.ones(len(embeddings), dtype=np.float32),
+        dc=parameters.density_radius,
+        rhoc=parameters.min_density,
+        do=parameters.outlier_distance,
+        backend=resolved_clue_backend(parameters.clue_backend),
     )
+
+    return result.cluster_ids
+
+
+def cluster_labels(embeddings: Tensor, parameters: ClusteringParameters) -> Tensor:
+    points = embeddings.detach().cpu().numpy()
+
+    if parameters.algorithm == "clue":
+        labels = clue_labels(points, parameters)
+    else:
+        labels = run_agglomerative(
+            points,
+            parameters.distance_threshold,
+            method=parameters.method,
+            metric=parameters.metric,
+        )
 
     return drop_small_clusters(
         torch.from_numpy(labels.astype(np.int64)), parameters.min_cluster_size

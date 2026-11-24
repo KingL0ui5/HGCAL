@@ -19,6 +19,7 @@ from evals.multiplicity_stratified import (
     plot_input_line,
     y_axis_top,
 )
+from evals.reco_metrics import CLUSTERING_ALGORITHMS
 
 EVAL_DATA_DIR = (
     Path(__file__).resolve().parents[1] / "data" / "spatial_transformer_runs"
@@ -27,8 +28,8 @@ INFONCE_COLOR = "#2a6fdb"
 DISCRIMINATIVE_COLOR = "#e0662b"
 
 
-def default_metrics_path(loss_name: str) -> Path:
-    return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_metrics.json"
+def default_metrics_path(loss_name: str, clustering: str) -> Path:
+    return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_{clustering}_metrics.json"
 
 
 def plot_loss_comparison(
@@ -107,18 +108,23 @@ def parse_args() -> argparse.Namespace:
         description="Overlay infonce and discriminative SpatialTransformer metrics"
     )
 
-    parser.add_argument("--infonce", type=Path, default=default_metrics_path("infonce"))
     parser.add_argument(
-        "--discriminative", type=Path, default=default_metrics_path("discriminative")
+        "--clustering", choices=CLUSTERING_ALGORITHMS, default="agglomerative"
+    )
+    parser.add_argument("--infonce", type=Path, default=None)
+    parser.add_argument("--discriminative", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
+    args = parser.parse_args()
+
+    args.infonce = args.infonce or default_metrics_path("infonce", args.clustering)
+    args.discriminative = args.discriminative or default_metrics_path(
+        "discriminative", args.clustering
+    )
+    args.output = args.output or (
+        EVAL_DATA_DIR / f"spatial_transformer_{args.clustering}_loss_comparison.png"
     )
 
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=EVAL_DATA_DIR / "spatial_transformer_loss_comparison.png",
-    )
-
-    return parser.parse_args()
+    return args
 
 
 if __name__ == "__main__":
