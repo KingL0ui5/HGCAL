@@ -24,6 +24,9 @@ IDEAL_VALUES = {"multiplicity ratio": 1.0}
 UNIT_INTERVAL_METRICS = {"efficiency", "purity"}
 PANEL_COLUMNS = 3
 SPREAD_RATIO_NAME = "mean intra-cluster spread/mean centroid separation"
+COSINE_RATIO_NAME = (
+    "mean centroid cosine similarity/mean intra-cluster cosine similarity"
+)
 OVERLAP_LINE_COLOR = "#c0392b"
 # a 3D gaussian of width s has mean distance to centre s * sqrt(8 / pi), and mean
 # |offset| s * sqrt(2 / pi) along one axis; two equal gaussians merge into one peak
@@ -53,6 +56,10 @@ class MultiplicityBin(BaseModel):
     axis_spread_ratios: list[Tensor] = Field(default_factory=list)
     input_spread_ratios: list[float] = Field(default_factory=list)
     input_axis_spread_ratios: list[Tensor] = Field(default_factory=list)
+    cosine_ratios: list[float] = Field(default_factory=list)
+    axis_cosine_ratios: list[Tensor] = Field(default_factory=list)
+    input_cosine_ratios: list[float] = Field(default_factory=list)
+    input_axis_cosine_ratios: list[Tensor] = Field(default_factory=list)
     n_events: int = 0
 
 
@@ -72,17 +79,33 @@ def axis_spread_ratio(geometry: EventGeometry) -> Tensor | None:
     return geometry.intra_distances.abs().mean(dim=0) / geometry.axis_separation
 
 
-def spread_ratio_metric(
+def cosine_ratio(geometry: EventGeometry) -> float | None:
+    if geometry.centroid_cosine is None:
+        return None
+
+    intra_cosine = float(geometry.intra_cosine.mean().item())
+
+    return geometry.centroid_cosine / intra_cosine
+
+
+def axis_cosine_ratio(geometry: EventGeometry) -> Tensor | None:
+    if geometry.axis_centroid_cosine is None:
+        return None
+
+    return geometry.axis_centroid_cosine / geometry.axis_intra_cosine.mean(dim=0)
+
+
+def ratio_metric(
+    name: str,
     ratios: dict[int, list[float]],
     prefix: str = "",
 ) -> dict[str, dict[int, float]]:
 
-    return {
-        f"{prefix}{SPREAD_RATIO_NAME}": {k: mean_or_nan(rs) for k, rs in ratios.items()}
-    }
+    return {f"{prefix}{name}": {k: finite_mean_or_nan(rs) for k, rs in ratios.items()}}
 
 
-def spread_ratio_by_dimension(
+def ratio_by_dimension(
+    name: str,
     ratios: dict[int, list[Tensor]],
     prefix: str = "",
 ) -> dict[str, dict[int, float]]:
@@ -90,7 +113,7 @@ def spread_ratio_by_dimension(
     n_dimensions = next((len(r) for rs in ratios.values() for r in rs), 0)
 
     return {
-        f"{prefix}{SPREAD_RATIO_NAME} dim {dim}": {
+        f"{prefix}{name} dim {dim}": {
             k: finite_mean_or_nan([float(r[dim]) for r in rs])
             for k, rs in ratios.items()
         }
@@ -113,10 +136,15 @@ class MultiplicityStratifiedReco:
         bins.counts.add(counts)
         bins.n_events += 1
         ratio, axis_ratio = spread_ratio(geometry), axis_spread_ratio(geometry)
+        cosine, axis_cosine = cosine_ratio(geometry), axis_cosine_ratio(geometry)
 
         if ratio is not None and axis_ratio is not None:
             bins.spread_ratios.append(ratio)
             bins.axis_spread_ratios.append(axis_ratio)
+
+        if cosine is not None and axis_cosine is not None:
+            bins.cosine_ratios.append(cosine)
+            bins.axis_cosine_ratios.append(axis_cosine)
 
     def add_input_geometry(
         self,
@@ -126,10 +154,15 @@ class MultiplicityStratifiedReco:
 
         bins = self.bins.setdefault(multiplicity, MultiplicityBin())
         ratio, axis_ratio = spread_ratio(geometry), axis_spread_ratio(geometry)
+        cosine, axis_cosine = cosine_ratio(geometry), axis_cosine_ratio(geometry)
 
         if ratio is not None and axis_ratio is not None:
             bins.input_spread_ratios.append(ratio)
             bins.input_axis_spread_ratios.append(axis_ratio)
+
+        if cosine is not None and axis_cosine is not None:
+            bins.input_cosine_ratios.append(cosine)
+            bins.input_axis_cosine_ratios.append(axis_cosine)
 
     @property
     def n_events(self) -> dict[int, int]:
@@ -144,15 +177,37 @@ class MultiplicityStratifiedReco:
             "multiplicity ratio": {
                 k: self.bins[k].counts.multiplicity_ratio for k in keys
             },
-            **spread_ratio_metric({k: self.bins[k].spread_ratios for k in keys}),
-            **spread_ratio_by_dimension(
-                {k: self.bins[k].axis_spread_ratios for k in keys}
+            **ratio_metric(
+                SPREAD_RATIO_NAME, {k: self.bins[k].spread_ratios for k in keys}
             ),
-            **spread_ratio_metric(
-                {k: self.bins[k].input_spread_ratios for k in keys}, INPUT_PREFIX
+            **ratio_by_dimension(
+                SPREAD_RATIO_NAME, {k: self.bins[k].axis_spread_ratios for k in keys}
             ),
-            **spread_ratio_by_dimension(
-                {k: self.bins[k].input_axis_spread_ratios for k in keys}, INPUT_PREFIX
+            **ratio_metric(
+                COSINE_RATIO_NAME, {k: self.bins[k].cosine_ratios for k in keys}
+            ),
+            **ratio_by_dimension(
+                COSINE_RATIO_NAME, {k: self.bins[k].axis_cosine_ratios for k in keys}
+            ),
+            **ratio_metric(
+                SPREAD_RATIO_NAME,
+                {k: self.bins[k].input_spread_ratios for k in keys},
+                INPUT_PREFIX,
+            ),
+            **ratio_by_dimension(
+                SPREAD_RATIO_NAME,
+                {k: self.bins[k].input_axis_spread_ratios for k in keys},
+                INPUT_PREFIX,
+            ),
+            **ratio_metric(
+                COSINE_RATIO_NAME,
+                {k: self.bins[k].input_cosine_ratios for k in keys},
+                INPUT_PREFIX,
+            ),
+            **ratio_by_dimension(
+                COSINE_RATIO_NAME,
+                {k: self.bins[k].input_axis_cosine_ratios for k in keys},
+                INPUT_PREFIX,
             ),
         }
 
@@ -195,16 +250,30 @@ def y_axis_top(name: str, values: list[float]) -> float:
     return peak * 1.15
 
 
+def y_axis_bottom(values: list[float]) -> float:
+    finite_values = [value for value in values if math.isfinite(value)]
+
+    return min([*finite_values, 0.0]) * 1.15
+
+
 def panel_names(metrics: dict[str, dict[int, float]]) -> list[str]:
     return [name for name in metrics if not name.startswith(INPUT_PREFIX)]
 
 
-def spread_ratio_names(metrics: dict[str, dict[int, float]]) -> list[str]:
-    return [name for name in panel_names(metrics) if SPREAD_RATIO_NAME in name]
+def is_ratio_metric(name: str) -> bool:
+    return SPREAD_RATIO_NAME in name or COSINE_RATIO_NAME in name
+
+
+def ratio_names(
+    metrics: dict[str, dict[int, float]],
+    ratio_name: str,
+) -> list[str]:
+
+    return [name for name in panel_names(metrics) if ratio_name in name]
 
 
 def reco_metric_names(metrics: dict[str, dict[int, float]]) -> list[str]:
-    return [name for name in panel_names(metrics) if SPREAD_RATIO_NAME not in name]
+    return [name for name in panel_names(metrics) if not is_ratio_metric(name)]
 
 
 def panel_title(name: str) -> str:
@@ -221,12 +290,8 @@ def overlap_ratio(name: str) -> float | None:
     return None
 
 
-def spread_ratio_label(name: str) -> str:
-    return (
-        "3D"
-        if name == SPREAD_RATIO_NAME
-        else name.removeprefix(SPREAD_RATIO_NAME).strip()
-    )
+def ratio_label(name: str, ratio_name: str) -> str:
+    return "3D" if name == ratio_name else name.removeprefix(ratio_name).strip()
 
 
 def plot_overlap_line(axis: plt.Axes, name: str) -> list[float]:
@@ -325,14 +390,15 @@ def plot_by_multiplicity(
     plt.close(figure)
 
 
-def plot_spread_ratios(
+def plot_ratios(
     metrics: dict[str, dict[int, float]],
     n_events: dict[int, int],
     title: str,
+    ratio_name: str,
     output_path: Path,
 ) -> None:
 
-    names = spread_ratio_names(metrics)
+    names = ratio_names(metrics, ratio_name)
     keys = sorted(n_events)
     sns.set_theme(style="whitegrid", rc={"axes.grid.axis": "y"})
     figure, axes = plt.subplots(
@@ -361,12 +427,12 @@ def plot_spread_ratios(
         axis.legend(loc="best")
         axis.set_xticks(keys)
         axis.set_xlabel("multiplicity")
-        axis.set_title(spread_ratio_label(name))
+        axis.set_title(ratio_label(name, ratio_name))
         sns.despine(ax=axis)
-        axis.set_ylim(0.0, y_axis_top(name, values))
+        axis.set_ylim(y_axis_bottom(values), y_axis_top(name, values))
 
-    axes.flat[0].set_ylabel(panel_title(SPREAD_RATIO_NAME))
-    figure.suptitle(f"{title} | {SPREAD_RATIO_NAME}")
+    axes.flat[0].set_ylabel(panel_title(ratio_name))
+    figure.suptitle(f"{title} | {ratio_name}")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=150)

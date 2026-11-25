@@ -18,6 +18,7 @@ from evals.multiplicity_stratified import (
     panel_title,
     plot_input_line,
     plot_overlap_line,
+    y_axis_bottom,
     y_axis_top,
 )
 from evals.reco_metrics import CLUSTERING_ALGORITHMS
@@ -98,7 +99,7 @@ def plot_loss_comparison(
         axis.set_xlabel("multiplicity")
         axis.set_title(panel_title(name))
         sns.despine(ax=axis)
-        axis.set_ylim(0.0, y_axis_top(name, all_values))
+        axis.set_ylim(y_axis_bottom(all_values), y_axis_top(name, all_values))
 
     for index, (axis, name) in enumerate(zip(axes.flat, names)):
         if index == 0 or INPUT_PREFIX + name in series["infonce"][0][0]:
