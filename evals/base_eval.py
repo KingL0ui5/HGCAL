@@ -17,6 +17,7 @@ from evals.eval_utils import (
     ModelT,
     Timings,
     checkpoint_loss_name,
+    checkpoint_run_id,
     load_run_config,
     load_weights,
 )
@@ -75,6 +76,7 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             self.run_config.get("train", {}).get("seed", TrainConfig().seed)
         )
         self.loss_name = checkpoint_loss_name(self.checkpoint, self.checkpoint_pattern)
+        self.run_id = checkpoint_run_id(self.checkpoint)
         self.stratified_path = (
             Path(args.stratified_output)
             if args.stratified_output
@@ -162,10 +164,12 @@ class BaseEvaluator(ABC, Generic[ModelT]):
         return self.device.type == "cuda"
 
     def output_path(self, kind: str, suffix: str = "png") -> Path:
+        run_tag = f"{self.loss_name}_{self.run_id}" if self.run_id else self.loss_name
+
         return (
             EVAL_DATA_DIR
             / f"{self.output_prefix}_runs"
-            / f"{self.output_prefix}_{self.loss_name}_"
+            / f"{self.output_prefix}_{run_tag}_"
             f"{self.clustering_parameters.algorithm}_{kind}.{suffix}"
         )
 

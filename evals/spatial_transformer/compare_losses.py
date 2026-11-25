@@ -30,6 +30,15 @@ DISCRIMINATIVE_COLOR = "#e0662b"
 
 
 def default_metrics_path(loss_name: str, clustering: str) -> Path:
+    run_paths = sorted(
+        EVAL_DATA_DIR.glob(
+            f"spatial_transformer_{loss_name}_*_{clustering}_metrics.json"
+        )
+    )
+
+    if run_paths:
+        return run_paths[-1]
+
     return EVAL_DATA_DIR / f"spatial_transformer_{loss_name}_{clustering}_metrics.json"
 
 

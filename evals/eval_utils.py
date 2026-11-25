@@ -12,6 +12,7 @@ from data import DATA_PATH
 from evals.geometry_metrics import geometry_metrics
 
 ModelT = TypeVar("ModelT", bound=nn.Module)
+RUN_ID_PATTERN = re.compile(r"\d{8}_\d{6}")
 
 
 class EventOutputs(NamedTuple):
@@ -116,6 +117,12 @@ def checkpoint_loss_name(checkpoint: Path, filename_pattern: re.Pattern[str]) ->
     match = filename_pattern.match(checkpoint.stem)
 
     return match.group("loss") if match else "unknown"
+
+
+def checkpoint_run_id(checkpoint: Path) -> str | None:
+    match = RUN_ID_PATTERN.search(checkpoint.stem)
+
+    return match.group(0) if match else None
 
 
 def load_weights(

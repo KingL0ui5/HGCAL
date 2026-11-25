@@ -38,7 +38,7 @@ if [ "$uses_clue" = true ] && [ -n "$BOOST_MODULE" ]; then
 fi
 
 latest_checkpoint() {
-    ls -t trained_models/"$1"/"$2"_"$3"_*_best.pt 2>/dev/null | head -n 1 || true
+    ls trained_models/"$1"/"$2"_"$3"_*_best.pt 2>/dev/null | sort | tail -n 1 || true
 }
 
 GEO_EVALS=(
