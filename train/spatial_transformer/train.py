@@ -3,11 +3,6 @@ import json
 import time
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import torch
 from pydantic import BaseModel, ConfigDict
 from torch import Tensor, nn, optim
@@ -18,15 +13,16 @@ from data import IGNORE_LABEL
 from losses import build_loss
 from models.spatial_transformer import SpatialConfig, SpatialTransformer
 from train.train_utils import (
+    TRAINING_OUTPUT_DIR,
     TrainConfig,
     batch_to_device,
     build_loaders,
+    plot_losses,
     select_device,
 )
 
 ENERGY_FEATURE_INDEX = 3
 LOSS_CHOICES = ("infonce", "discriminative")
-TRAINING_OUTPUT_DIR = Path("trained_models/training_output")
 
 
 class FlatBatch(BaseModel):
@@ -172,25 +168,9 @@ def train(
 
     writer.close()
     print(f"total training time: {time.perf_counter() - training_start:.0f}s")
-    TRAINING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     plot_losses(
         train_losses, validation_losses, TRAINING_OUTPUT_DIR / f"{run_name}_loss.png"
     )
-
-
-def plot_losses(
-    train_losses: list[float], validation_losses: list[float], path: Path
-) -> None:
-    epochs = range(1, len(train_losses) + 1)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(epochs, train_losses, marker="o", label="train")
-    ax.plot(epochs, validation_losses, marker="o", label="validation")
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("loss")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
 
 
 def parse_args() -> argparse.Namespace:

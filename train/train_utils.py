@@ -1,5 +1,10 @@
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import torch
 from pydantic import BaseModel
 from torch import Tensor
@@ -11,6 +16,8 @@ from data import (
     collate_events,
     get_splits_by_file,
 )
+
+TRAINING_OUTPUT_DIR = Path("trained_models/training_output")
 
 
 class TrainConfig(BaseModel):
@@ -71,3 +78,22 @@ def build_loaders(
     validation_loader = build_loader(splits["val"], config, pin_memory)
 
     return train_loader, validation_loader
+
+
+def plot_losses(
+    train_losses: list[float],
+    validation_losses: list[float],
+    path: Path,
+) -> None:
+
+    epochs = range(1, len(train_losses) + 1)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(epochs, train_losses, marker="o", label="train")
+    ax.plot(epochs, validation_losses, marker="o", label="validation")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("loss")
+    ax.legend()
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
