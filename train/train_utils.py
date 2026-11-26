@@ -84,15 +84,30 @@ def plot_losses(
     train_losses: list[float],
     validation_losses: list[float],
     path: Path,
+    learning_rates: list[float] | None = None,
 ) -> None:
 
     epochs = range(1, len(train_losses) + 1)
-    fig, ax = plt.subplots(figsize=(6, 4))
+
+    if not learning_rates:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig, (ax, lr_ax) = plt.subplots(
+            2, 1, figsize=(6, 6), sharex=True, height_ratios=(2, 1)
+        )
+        lr_ax.plot(range(1, len(learning_rates) + 1), learning_rates, color="tab:green")
+        lr_ax.set_ylabel("learning rate")
+        lr_ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+        lr_ax.set_xlabel("epoch")
+
     ax.plot(epochs, train_losses, marker="o", label="train")
     ax.plot(epochs, validation_losses, marker="o", label="validation")
-    ax.set_xlabel("epoch")
     ax.set_ylabel("loss")
     ax.legend()
+
+    if not learning_rates:
+        ax.set_xlabel("epoch")
+
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150)

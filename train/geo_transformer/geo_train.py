@@ -236,6 +236,7 @@ def train(
     global_step = 0
     train_losses: list[float] = []
     validation_losses: list[float] = []
+    learning_rates: list[float] = []
 
     for epoch in range(config.n_epochs):
         start_time = time.perf_counter()
@@ -260,6 +261,7 @@ def train(
 
         train_losses.append(train_loss)
         validation_losses.append(validation_loss)
+        learning_rates.append(learning_rate)
         seconds = time.perf_counter() - start_time
         is_best = validation_loss < best_validation_loss
         print(
@@ -284,7 +286,10 @@ def train(
 
     writer.close()
     plot_losses(
-        train_losses, validation_losses, TRAINING_OUTPUT_DIR / f"{run_name}_loss.png"
+        train_losses,
+        validation_losses,
+        TRAINING_OUTPUT_DIR / f"{run_name}_loss.png",
+        learning_rates,
     )
 
 

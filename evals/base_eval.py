@@ -89,8 +89,8 @@ class BaseEvaluator(ABC, Generic[ModelT]):
             if args.metrics_output
             else self.output_path("metrics", "json")
         )
-        self.spread_ratio_path = self.output_path("spread_ratio")
-        self.cosine_ratio_path = self.output_path("cosine_ratio")
+        self.spread_ratio_path = self.output_path("spread_ratio", per_clustering=False)
+        self.cosine_ratio_path = self.output_path("cosine_ratio", per_clustering=False)
         self.timings = Timings()
 
     @classmethod
@@ -166,14 +166,18 @@ class BaseEvaluator(ABC, Generic[ModelT]):
     def pin_memory(self) -> bool:
         return self.device.type == "cuda"
 
-    def output_path(self, kind: str, suffix: str = "png") -> Path:
+    def output_path(
+        self, kind: str, suffix: str = "png", per_clustering: bool = True
+    ) -> Path:
         run_tag = f"{self.loss_name}_{self.run_id}" if self.run_id else self.loss_name
+
+        if per_clustering:
+            run_tag = f"{run_tag}_{self.clustering_parameters.algorithm}"
 
         return (
             EVAL_DATA_DIR
             / f"{self.output_prefix}_runs"
-            / f"{self.output_prefix}_{run_tag}_"
-            f"{self.clustering_parameters.algorithm}_{kind}.{suffix}"
+            / f"{self.output_prefix}_{run_tag}_{kind}.{suffix}"
         )
 
     def iter_events(self, loader: DataLoader) -> Iterator[EventOutputs]:

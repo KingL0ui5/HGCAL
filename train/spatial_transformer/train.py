@@ -128,10 +128,12 @@ def train(
 
     train_losses: list[float] = []
     validation_losses: list[float] = []
+    learning_rates: list[float] = []
     training_start = time.perf_counter()
 
     for epoch in range(config.n_epochs):
         print(f"epoch {epoch + 1}/{config.n_epochs}")
+        learning_rate = optimizer.param_groups[0]["lr"]
 
         train_loss, global_step = run_epoch(
             model,
@@ -151,6 +153,7 @@ def train(
         is_best = validation_loss < best_validation_loss
         train_losses.append(train_loss)
         validation_losses.append(validation_loss)
+        learning_rates.append(learning_rate)
 
         writer.add_scalars(
             "Loss/epoch",
@@ -158,6 +161,7 @@ def train(
             epoch + 1,
         )
 
+        writer.add_scalar("LearningRate", learning_rate, epoch + 1)
         writer.flush()
 
         if is_best:
@@ -169,7 +173,10 @@ def train(
     writer.close()
     print(f"total training time: {time.perf_counter() - training_start:.0f}s")
     plot_losses(
-        train_losses, validation_losses, TRAINING_OUTPUT_DIR / f"{run_name}_loss.png"
+        train_losses,
+        validation_losses,
+        TRAINING_OUTPUT_DIR / f"{run_name}_loss.png",
+        learning_rates,
     )
 
 

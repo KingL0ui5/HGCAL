@@ -6,33 +6,38 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 from train.train_utils import plot_losses
 
 EPOCH_LOSS_TAG = "Loss/epoch"
+LEARNING_RATE_TAG = "LearningRate"
 DEFAULT_OUTPUT_DIR = Path("trained_models/training_outputs")
 
 
-def epoch_losses(series_dir: Path) -> list[float]:
+def epoch_scalars(series_dir: Path, tag: str = EPOCH_LOSS_TAG) -> list[float]:
     events = EventAccumulator(str(series_dir))
     events.Reload()
 
-    if EPOCH_LOSS_TAG not in events.Tags()["scalars"]:
+    if tag not in events.Tags()["scalars"]:
         return []
 
-    by_epoch = {
-        int(event.step): float(event.value) for event in events.Scalars(EPOCH_LOSS_TAG)
-    }
+    by_epoch = {int(event.step): float(event.value) for event in events.Scalars(tag)}
 
     return [by_epoch[epoch] for epoch in sorted(by_epoch)]
 
 
 def plot_run(run_dir: Path, output_dir: Path) -> Path | None:
-    train_losses = epoch_losses(run_dir / "Loss_epoch_train")
-    validation_losses = epoch_losses(run_dir / "Loss_epoch_validation")
+    train_losses = epoch_scalars(run_dir / "Loss_epoch_train")
+    validation_losses = epoch_scalars(run_dir / "Loss_epoch_validation")
+    learning_rates = epoch_scalars(run_dir, LEARNING_RATE_TAG)
     n_epochs = min(len(train_losses), len(validation_losses))
 
     if n_epochs == 0:
         return None
 
     output_path = output_dir / f"{run_dir.name}_loss.png"
-    plot_losses(train_losses[:n_epochs], validation_losses[:n_epochs], output_path)
+    plot_losses(
+        train_losses[:n_epochs],
+        validation_losses[:n_epochs],
+        output_path,
+        learning_rates[:n_epochs],
+    )
 
     return output_path
 
