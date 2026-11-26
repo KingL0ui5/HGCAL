@@ -1,26 +1,32 @@
-from dataclasses import dataclass
+from functools import cache
 
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch import Tensor
 
 from clustering.agglomerative import run_agglomerative
+from clustering.clue import probe_backend, run_clue
 
+CLUSTERING_ALGORITHMS = ("agglomerative", "clue")
 MATCH_ENERGY_FRACTION = 0.7
-PURE_SCORE_THRESHOLD = 0.2
+PURE_FRACTION_THRESHOLD = 0.8
 NOISE_LABEL = -1
 
 
-@dataclass
-class ClusteringParameters:
+class ClusteringParameters(BaseModel):
+    algorithm: str = "agglomerative"
     distance_threshold: float = 0.05
     method: str = "average"
     metric: str = "cosine"
     min_cluster_size: int = 1
+    density_radius: float = 0.1
+    min_density: float = 5.0
+    outlier_distance: float | None = None
+    clue_backend: str = "auto"
 
 
-@dataclass
-class ReconstructionCounts:
+class ReconstructionCounts(BaseModel):
     n_sim: int = 0
     n_matched: int = 0
     n_reco: int = 0
@@ -55,13 +61,36 @@ def drop_small_clusters(labels: Tensor, min_cluster_size: int) -> Tensor:
     return labels.masked_fill(is_small, NOISE_LABEL)
 
 
-def cluster_labels(embeddings: Tensor, parameters: ClusteringParameters) -> Tensor:
-    labels = run_agglomerative(
-        embeddings.detach().cpu().numpy(),
-        parameters.distance_threshold,
-        method=parameters.method,
-        metric=parameters.metric,
+@cache
+def resolved_clue_backend(requested: str) -> str:
+    return requested if requested != "auto" else probe_backend(requested)
+
+
+def clue_labels(embeddings: np.ndarray, parameters: ClusteringParameters) -> np.ndarray:
+    result = run_clue(
+        embeddings,
+        np.ones(len(embeddings), dtype=np.float32),
+        dc=parameters.density_radius,
+        rhoc=parameters.min_density,
+        do=parameters.outlier_distance,
+        backend=resolved_clue_backend(parameters.clue_backend),
     )
+
+    return result.cluster_ids
+
+
+def cluster_labels(embeddings: Tensor, parameters: ClusteringParameters) -> Tensor:
+    points = embeddings.detach().cpu().numpy()
+
+    if parameters.algorithm == "clue":
+        labels = clue_labels(points, parameters)
+    else:
+        labels = run_agglomerative(
+            points,
+            parameters.distance_threshold,
+            method=parameters.method,
+            metric=parameters.metric,
+        )
 
     return drop_small_clusters(
         torch.from_numpy(labels.astype(np.int64)), parameters.min_cluster_size
@@ -76,8 +105,10 @@ def event_counts(
 
     energy = energy.to(torch.float64)
     _, sim_index = torch.unique(sim_labels, return_inverse=True)
+
     n_sim = int(sim_index.max().item()) + 1
-    sim_energy = torch.zeros(n_sim, dtype=torch.float64).index_add_(
+
+    sim_energies = torch.zeros(n_sim, dtype=torch.float64).index_add_(
         0, sim_index, energy
     )
 
@@ -91,23 +122,32 @@ def event_counts(
     clustered_sim = sim_index[clustered]
     clustered_energy = energy[clustered]
 
-    shared_energy = torch.zeros(n_reco, n_sim, dtype=torch.float64).index_put_(
-        (reco_index, clustered_sim), clustered_energy, accumulate=True
-    )
-    shared_squared = torch.zeros(n_reco, n_sim, dtype=torch.float64).index_put_(
-        (reco_index, clustered_sim), clustered_energy.square(), accumulate=True
+    energy_per_reco_per_sim_cluster = torch.zeros(
+        n_reco, n_sim, dtype=torch.float64
+    ).index_put_((reco_index, clustered_sim), clustered_energy, accumulate=True)
+
+    frac_max_sim_energy_in_all_reco = energy_per_reco_per_sim_cluster.max(
+        dim=0
+    ).values / sim_energies.clamp_min(1e-12)
+
+    n_matched = len(
+        frac_max_sim_energy_in_all_reco[
+            frac_max_sim_energy_in_all_reco >= MATCH_ENERGY_FRACTION
+        ]
     )
 
-    best_fraction = shared_energy.max(dim=0).values / sim_energy.clamp_min(1e-12)
-    reco_to_sim_score = 1.0 - shared_squared.max(dim=1).values / shared_squared.sum(
+    reco_energy = energy_per_reco_per_sim_cluster.sum(dim=1)
+    impurity = 1.0 - energy_per_reco_per_sim_cluster.max(
         dim=1
-    ).clamp_min(1e-12)
+    ).values / reco_energy.clamp_min(1e-12)
+
+    n_pure = len(impurity[impurity < PURE_FRACTION_THRESHOLD])
 
     return ReconstructionCounts(
         n_sim=n_sim,
-        n_matched=int((best_fraction >= MATCH_ENERGY_FRACTION).sum().item()),
+        n_matched=n_matched,
         n_reco=n_reco,
-        n_pure=int((reco_to_sim_score < PURE_SCORE_THRESHOLD).sum().item()),
+        n_pure=n_pure,
     )
 
 

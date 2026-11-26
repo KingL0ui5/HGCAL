@@ -4,10 +4,10 @@ import json
 import math
 import time
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor, nn, optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils import tensorboard
@@ -23,15 +23,14 @@ from data import (
 )
 from losses import build_loss
 from models.geo_transformer import GeoTransformer
-from train.basic_transformer.train import select_device
+from train.train_utils import TRAINING_OUTPUT_DIR, plot_losses, select_device
 
 FEATURE_NAMES = ["x", "y", "z", "energy", "eta", "sin_phi", "cos_phi"]
 GEOMETRIC_FEATURE_INDICES = [0, 1, 2, 4, 5, 6]
 RHO_MIN = 1e-6
 
 
-@dataclass
-class ModelConfig:
+class ModelConfig(BaseModel):
     hidden_dim: int = 128
     num_layers: int = 6
     n_heads: int = 8
@@ -42,14 +41,12 @@ class ModelConfig:
     drop_path: float = 0.1
 
 
-@dataclass
-class LossConfig:
+class LossConfig(BaseModel):
     name: str = "infonce"
-    kwargs: dict[str, float] = field(default_factory=dict)
+    kwargs: dict[str, float] = Field(default_factory=dict)
 
 
-@dataclass
-class TrainConfig:
+class TrainConfig(BaseModel):
     batch_size: int = 8
     learning_rate: float = 3e-4
     weight_decay: float = 1e-2
@@ -237,6 +234,9 @@ def train(
 
     best_validation_loss = float("inf")
     global_step = 0
+    train_losses: list[float] = []
+    validation_losses: list[float] = []
+    learning_rates: list[float] = []
 
     for epoch in range(config.n_epochs):
         start_time = time.perf_counter()
@@ -259,6 +259,9 @@ def train(
             model, validation_loader, loss_fn, device, config
         )
 
+        train_losses.append(train_loss)
+        validation_losses.append(validation_loss)
+        learning_rates.append(learning_rate)
         seconds = time.perf_counter() - start_time
         is_best = validation_loss < best_validation_loss
         print(
@@ -282,6 +285,12 @@ def train(
         torch.save(model.state_dict(), output_dir / f"{run_name}_last.pt")
 
     writer.close()
+    plot_losses(
+        train_losses,
+        validation_losses,
+        TRAINING_OUTPUT_DIR / f"{run_name}_loss.png",
+        learning_rates,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -322,7 +331,7 @@ def main() -> None:
     model = GeoTransformer(
         in_dim=len(FEATURE_NAMES),
         geom_idx=GEOMETRIC_FEATURE_INDICES,
-        **asdict(model_config),
+        **model_config.model_dump(),
     ).to(device)
 
     loss_fn = build_loss(loss_config.name, **loss_config.kwargs).to(device)
@@ -334,9 +343,9 @@ def main() -> None:
     (Path(train_config.output_dir) / f"{run_name}_config.json").write_text(
         json.dumps(
             {
-                "model": asdict(model_config),
-                "loss": asdict(loss_config),
-                "train": asdict(train_config),
+                "model": model_config.model_dump(),
+                "loss": loss_config.model_dump(),
+                "train": train_config.model_dump(),
                 "features": FEATURE_NAMES,
                 "geom_idx": GEOMETRIC_FEATURE_INDICES,
             },

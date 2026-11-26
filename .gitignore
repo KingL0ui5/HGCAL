@@ -6,3 +6,4 @@ trained_models/
 *.pt
 untracked/
 evals/data/
+pull_from_hpc.sh

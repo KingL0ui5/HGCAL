@@ -11,52 +11,90 @@ cd "$PBS_O_WORKDIR"
 module purge
 
 export PATH="$HOME/.local/bin:$PATH"
+export UV_PYTHON_PREFERENCE=only-managed
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "uv not found; install it on the login node first: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
     exit 1
 fi
 
-TRANSFORMER_MODULE="evals.basic_transformer.transformer_eval"
 GEO_MODULE="evals.geo_transformer.geo_transformer_eval"
+SPATIAL_MODULE="evals.spatial_transformer.spatial_eval"
 
-EVALS=(
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_12112026.pt"
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_infonce_20261118_192333_best.pt"
-    "$TRANSFORMER_MODULE trained_models/basic_transformer/transformer_discriminative_20261118_192450_best.pt"
-    "$GEO_MODULE trained_models/geo_transformer/geo_infonce_20261112_070054_best.pt"
-    "$GEO_MODULE trained_models/geo_transformer/geo_discriminative_20261109_143754_best.pt"
+EVAL_SET="${EVAL_SET:-all}"
+CLUSTERINGS="${CLUSTERINGS:-clue agglomerative}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+BOOST_MODULE="${BOOST_MODULE:-Boost/1.88.0-GCC-14.3.0}"
+
+uses_clue=false
+
+if [[ " $CLUSTERINGS " == *" clue "* ]]; then
+    uses_clue=true
+fi
+
+if [ "$uses_clue" = true ] && [ -n "$BOOST_MODULE" ]; then
+    module load tools/prod
+    module load "$BOOST_MODULE"
+fi
+
+latest_checkpoint() {
+    ls trained_models/"$1"/"$2"_"$3"_*_best.pt 2>/dev/null | sort | tail -n 1 || true
+}
+
+GEO_EVALS=(
+    "$GEO_MODULE $(latest_checkpoint geo_transformer geo infonce)"
+    "$GEO_MODULE $(latest_checkpoint geo_transformer geo discriminative)"
 )
 
-mkdir -p evals/data/basic_transformer_runs evals/data/geo_transformer_runs
+SPATIAL_EVALS=(
+    "$SPATIAL_MODULE $(latest_checkpoint spatial_transformer spatial infonce)"
+    "$SPATIAL_MODULE $(latest_checkpoint spatial_transformer spatial discriminative)"
+)
+
+case "$EVAL_SET" in
+    all) EVALS=("${GEO_EVALS[@]}" "${SPATIAL_EVALS[@]}") ;;
+    spatial) EVALS=("${SPATIAL_EVALS[@]}") ;;
+    geo) EVALS=("${GEO_EVALS[@]}") ;;
+    *) echo "unknown EVAL_SET: $EVAL_SET (use all, spatial or geo)" >&2; exit 1 ;;
+esac
+
+mkdir -p evals/data/geo_transformer_runs evals/data/spatial_transformer_runs
 
 uv sync --frozen
 
 .venv/bin/python -c "import torch; print('cuda available:', torch.cuda.is_available())"
+
+if [ "$uses_clue" = true ]; then
+    .venv/bin/python -c "from clustering.clue import probe_backend; print('clue backend:', probe_backend())"
+fi
 
 failed=0
 
 for entry in "${EVALS[@]}"; do
     read -r module checkpoint <<< "$entry"
 
-    if [ ! -f "$checkpoint" ]; then
+    if [ -z "$checkpoint" ] || [ ! -f "$checkpoint" ]; then
         echo "checkpoint not found: $checkpoint" >&2
         failed=$((failed + 1))
         continue
     fi
 
     case "$module" in
-        "$TRANSFORMER_MODULE") runs_dir="evals/data/basic_transformer_runs" ;;
+        "$SPATIAL_MODULE") runs_dir="evals/data/spatial_transformer_runs" ;;
         *) runs_dir="evals/data/geo_transformer_runs" ;;
     esac
 
     run_name="$(basename "$checkpoint" .pt)"
-    echo "=== evaluating $checkpoint with $module ==="
 
-    if ! .venv/bin/python -m "$module" --checkpoint "$checkpoint" 2>&1 | tee "$runs_dir/eval_${run_name}_${PBS_JOBID}.out"; then
-        echo "eval failed: $checkpoint" >&2
-        failed=$((failed + 1))
-    fi
+    for clustering in $CLUSTERINGS; do
+        echo "=== evaluating $checkpoint with $module ($clustering) ==="
+
+        # shellcheck disable=SC2086
+        if ! .venv/bin/python -m "$module" --checkpoint "$checkpoint" --clustering "$clustering" $EXTRA_ARGS 2>&1 | tee "$runs_dir/eval_${run_name}_${clustering}_${PBS_JOBID}.out"; then
+            echo "eval failed: $checkpoint ($clustering)" >&2
+            failed=$((failed + 1))
+        fi
+    done
 done
 
 echo "evals finished, failures: $failed"

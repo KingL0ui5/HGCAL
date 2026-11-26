@@ -1,21 +1,23 @@
 import argparse
 import json
 import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
+from pydantic import BaseModel, ConfigDict
 from torch import Tensor, nn, optim
 from torch.utils import tensorboard
 from torch.utils.data import DataLoader
 
 from data import IGNORE_LABEL
 from losses import build_loss
-from models.transformer import ModelConfig, TransformerModel
-from train.basic_transformer.train import (
+from models.spatial_transformer import SpatialConfig, SpatialTransformer
+from train.train_utils import (
+    TRAINING_OUTPUT_DIR,
     TrainConfig,
     batch_to_device,
     build_loaders,
+    plot_losses,
     select_device,
 )
 
@@ -23,8 +25,9 @@ ENERGY_FEATURE_INDEX = 3
 LOSS_CHOICES = ("infonce", "discriminative")
 
 
-@dataclass
-class FlatBatch:
+class FlatBatch(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     y: Tensor
     batch: Tensor
     energy: Tensor
@@ -50,7 +53,7 @@ def flatten_batch(
 
 
 def run_epoch(
-    model: TransformerModel,
+    model: SpatialTransformer,
     loader: DataLoader,
     loss_fn: nn.Module,
     device: torch.device,
@@ -60,6 +63,7 @@ def run_epoch(
     global_step: int = 0,
 ) -> tuple[float, int]:
 
+    start_time = time.perf_counter()
     is_training = optimizer is not None
     model.train(is_training)
     total_loss = 0.0
@@ -69,7 +73,7 @@ def run_epoch(
     with torch.set_grad_enabled(is_training):
         for cpu_batch in loader:
             batch = batch_to_device(cpu_batch, device)
-            embeddings = model.embed(batch["features"], batch["padding_mask"])
+            embeddings = model(batch["features"], batch["padding_mask"])
             flat_embeddings, flat_batch = flatten_batch(embeddings, batch)
             loss = loss_fn(flat_embeddings, flat_batch)
 
@@ -92,13 +96,17 @@ def run_epoch(
                 if writer is not None:
                     writer.add_scalar("Loss/train", mean_window_loss, global_step)
 
+                    epoch_duration = time.perf_counter() - start_time
+
+                    writer.add_scalar("Time/epoch_seconds", epoch_duration, global_step)
+
                 window_loss = 0.0
 
     return total_loss / max(n_batches, 1), global_step
 
 
 def train(
-    model: TransformerModel,
+    model: SpatialTransformer,
     train_loader: DataLoader,
     validation_loader: DataLoader,
     loss_fn: nn.Module,
@@ -113,13 +121,19 @@ def train(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
+
     writer = tensorboard.SummaryWriter(f"runs/{run_name}")
     best_validation_loss = float("inf")
     global_step = 0
 
+    train_losses: list[float] = []
+    validation_losses: list[float] = []
+    learning_rates: list[float] = []
+    training_start = time.perf_counter()
+
     for epoch in range(config.n_epochs):
-        start_time = time.perf_counter()
         print(f"epoch {epoch + 1}/{config.n_epochs}")
+        learning_rate = optimizer.param_groups[0]["lr"]
 
         train_loss, global_step = run_epoch(
             model,
@@ -131,22 +145,23 @@ def train(
             writer=writer,
             global_step=global_step,
         )
+
         validation_loss, _ = run_epoch(
             model, validation_loader, loss_fn, device, config
         )
 
-        seconds = time.perf_counter() - start_time
         is_best = validation_loss < best_validation_loss
-        print(
-            f"  train loss {train_loss:.4f} | val loss {validation_loss:.4f} "
-            f"| {seconds:.0f}s{' *best*' if is_best else ''}"
-        )
+        train_losses.append(train_loss)
+        validation_losses.append(validation_loss)
+        learning_rates.append(learning_rate)
 
         writer.add_scalars(
             "Loss/epoch",
             {"train": train_loss, "validation": validation_loss},
             epoch + 1,
         )
+
+        writer.add_scalar("LearningRate", learning_rate, epoch + 1)
         writer.flush()
 
         if is_best:
@@ -156,20 +171,28 @@ def train(
         torch.save(model.state_dict(), output_dir / f"{run_name}_last.pt")
 
     writer.close()
+    print(f"total training time: {time.perf_counter() - training_start:.0f}s")
+    plot_losses(
+        train_losses,
+        validation_losses,
+        TRAINING_OUTPUT_DIR / f"{run_name}_loss.png",
+        learning_rates,
+    )
 
 
 def parse_args() -> argparse.Namespace:
     defaults = TrainConfig()
     parser = argparse.ArgumentParser(
-        description="Train the basic Transformer with a metric-learning loss"
+        description="Train the SpatialTransformer with a metric-learning loss"
     )
     parser.add_argument("--loss", choices=LOSS_CHOICES, required=True)
     parser.add_argument("--epochs", type=int, default=defaults.n_epochs)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--lr", type=float, default=defaults.learning_rate)
     parser.add_argument("--num-workers", type=int, default=defaults.num_workers)
+    parser.add_argument("--out-dim", type=int, default=SpatialConfig().out_dim)
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("trained_models/basic_transformer")
+        "--output-dir", type=Path, default=Path("trained_models/spatial_transformer")
     )
 
     return parser.parse_args()
@@ -183,7 +206,7 @@ def main() -> None:
         n_epochs=int(args.epochs),
         num_workers=int(args.num_workers),
     )
-    model_config = ModelConfig()
+    model_config = SpatialConfig(out_dim=int(args.out_dim))
     loss_name = str(args.loss)
     output_dir = Path(args.output_dir)
     torch.manual_seed(train_config.seed)
@@ -192,19 +215,19 @@ def main() -> None:
     train_loader, validation_loader = build_loaders(
         train_config, pin_memory=device.type == "cuda"
     )
-    model = TransformerModel(model_config).to(device)
+    model = SpatialTransformer(model_config).to(device)
     loss_fn = build_loss(loss_name).to(device)
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Transformer ({n_parameters:,} params) | loss: {loss_name}")
+    print(f"SpatialTransformer ({n_parameters:,} params) | loss: {loss_name}")
 
-    run_name = f"transformer_{loss_name}_{time.strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"spatial_{loss_name}_{time.strftime('%Y%m%d_%H%M%S')}"
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / f"{run_name}_config.json").write_text(
         json.dumps(
             {
-                "model": asdict(model_config),
+                "model": model_config.model_dump(),
                 "loss": {"name": loss_name},
-                "train": asdict(train_config),
+                "train": train_config.model_dump(),
             },
             indent=2,
         )
